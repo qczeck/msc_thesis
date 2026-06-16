@@ -1,0 +1,301 @@
+% =====================================================================
+%  RoPART — MSc Computing Interim Report (SCAFFOLD)
+%  Maciej Kuczek, Imperial College London, Department of Computing (70081)
+%
+%  This file is a STRUCTURE-ONLY scaffold. Every section contains a
+%  \guide{...} note describing what to write and which references to draw
+%  on — it renders as a grey italic "[Writing guide]" block so it is easy
+%  to spot and delete. Replace each guide with your own prose, then remove
+%  the macro. The body is intentionally NOT written.
+%
+%  Build:  pdflatex interim_report  ->  bibtex interim_report
+%          ->  pdflatex x2
+%  Referencing: Vancouver (numbered, in order of appearance). We use
+%  unsrtnat as a portable approximation; swap in a vancouver.bst if your
+%  TeX distribution ships one (see the \bibliographystyle line below).
+% =====================================================================
+\documentclass[11pt,a4paper]{report}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[british]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue]{hyperref}
+\usepackage{xurl}
+
+% --- Writing-guide macro: delete the macro use as you fill each section ---
+\newcommand{\guide}[1]{%
+  \par\smallskip
+  \noindent{\color{gray!85!black}\small\itshape\textbf{[Writing guide]}~#1}%
+  \par\smallskip
+}
+
+\begin{document}
+
+% =====================================================================
+%  TITLE PAGE
+% =====================================================================
+\begin{titlepage}
+  \centering
+  \vspace*{1.5cm}
+
+  {\large Imperial College London \\[0.3em] Department of Computing\par}
+  \vspace{2.0cm}
+
+  {\LARGE\bfseries Relative Orientation in Off-Grid \\[0.4em]
+   Self-Supervised Learning:\\[0.6em]
+   Extending PART from Translation to Rigid Motion\par}
+  \vspace{1.0cm}
+
+  {\large\itshape RoPART --- Rotation + PART\par}
+  \vspace{2.0cm}
+
+  {\large Maciej Kuczek\par}
+  \vspace{0.4cm}
+  {\normalsize MSc Computing --- Individual Project (70081)\par}
+  \vspace{2.0cm}
+
+  \begin{tabular}{rl}
+    Supervisor:    & \textit{[supervisor name]} \\[0.3em]
+    Second marker: & \textit{[second-marker name]} \\
+  \end{tabular}
+
+  \vfill
+  {\normalsize Interim Report\par}
+  {\normalsize \today\par}
+\end{titlepage}
+
+% =====================================================================
+%  TABLE OF CONTENTS
+% =====================================================================
+\tableofcontents
+\clearpage
+
+% =====================================================================
+%  CHAPTER 1 — INTRODUCTION
+% =====================================================================
+\chapter{Introduction}
+
+\guide{Open for a reader who is \emph{not} a specialist. In a few sentences:
+what self-supervised pretext tasks are and why they matter for learning visual
+representations without labels; then narrow to spatial/position pretext tasks and
+name PART~\cite{part} as the immediate starting point. State the one-sentence
+gap up front: PART predicts relative \emph{translation} only, and orientation is
+left as future work.}
+
+\section{Problem and context}
+\guide{Set the scene properly. Contrast \emph{absolute} grid-position pretext tasks
+(MAE~\cite{mae}, MP3~\cite{mp3}, DropPos~\cite{droppos}) with PART's
+\emph{relative, off-grid} prediction~\cite{part}. Explain, in plain terms, that
+PART's target space is the translation subgroup of the plane, and that the natural
+unfinished step is the full group of planar rigid motions $\mathrm{SE}(2)$. Mention
+that the PART authors themselves flag ``modelling rotations'' as open future work
+(their Section~7) and the ``rotated lip implies a rotated nose'' intuition.}
+
+\section{Aims and objectives}
+\guide{State the research question crisply: does adding a relative orientation
+target $\Delta\varphi$ to each patch pair yield representations that are better on
+orientation-sensitive downstream tasks \emph{without} degrading classification?
+List 3--4 concrete objectives (design the rotation-aware pretext; implement it
+behind a flag; characterise whether $\Delta\varphi$ actually learns; evaluate
+downstream vs.\ a translation-only baseline). Keep it tight --- this is a promise
+you will measure yourself against in Chapter~4.}
+
+\section{Contributions}
+\guide{Bullet the intended deliverables (you can reuse the four from the proposal):
+(1)~RoPART, a continuous-rotation pretext $(\Delta x,\Delta y,\Delta\varphi)$
+behind a flag; (2)~an intrinsic characterisation of whether $\Delta\varphi$ learns,
+with the interpolation confound controlled; (3)~downstream evaluation vs.\ the
+translation-only baseline; (4)~a reproducible artefact. Frame the contribution as
+\emph{methodological} --- completing the relative pretext task towards rigid motion
+--- not a benchmark-chasing exercise.}
+
+\section{Report structure}
+\guide{One short paragraph signposting Chapters~2--4. Optional but reads well.}
+
+% =====================================================================
+%  CHAPTER 2 — BACKGROUND AND LITERATURE REVIEW
+% =====================================================================
+\chapter{Background and Literature Review}
+
+\guide{This is the heart of the interim report and the chapter most directly
+reusable in the final report. Aim for a \emph{narrative} that converges on PART and
+the rotation gap, not a list of paper summaries. Roughly 6--9 pages. Start from
+the ``essential'' tier of the background reading.}
+
+\section{Self-supervised representation learning}
+\guide{Briefly motivate SSL: learn transferable features from unlabelled images via
+a pretext task, then transfer/fine-tune. Place pretext tasks in context and lead
+into the spatial family. Keep this short --- it is scene-setting, not the focus.}
+
+\section{Spatial and position-based pretext tasks}
+\guide{The lineage that produces PART. Start with relative context prediction
+(Doersch et al.~\cite{context2015}) and jigsaw puzzles
+(Noroozi \& Favaro~\cite{jigsaw}) as the early patch-spatial pretext tasks; then
+the position-prediction / masked-modelling line on transformers: MAE~\cite{mae},
+MP3~\cite{mp3}, DropPos~\cite{droppos}. The key axis to draw out: these predict
+\emph{absolute} positions or reconstruct masked content on a fixed grid, whereas
+PART predicts \emph{relative} geometry between off-grid pairs. This contrast is the
+backbone of your argument.}
+
+\section{PART: relative composition of off-grid patches}
+\guide{The most important section --- give PART its own detailed treatment, as your
+work extends it directly~\cite{part}. Cover: (i)~off-grid continuous patch sampling
+(\texttt{v3}) and the absence of position embeddings; (ii)~the pairwise relative
+\emph{translation} target $(\Delta x,\Delta y)$; (iii)~the cross-attention relative
+encoder trained with MSE; (iv)~the relative-\emph{scale}/aspect extension
+$(\Delta w,\Delta h)$ as a proof of concept that the target framework is extensible
+(their Table~1), and the reported interference where scale terms delayed
+$\Delta x/\Delta y$ convergence; (v)~the negative-symmetry property
+$\theta(i\!\to\!j)=-\theta(j\!\to\!i)$ and the patch-uncertainty capability. End by
+naming the rotation gap their Section~7 leaves open --- this is your wedge.}
+
+\section{Rotation in self-supervision and in architectures}
+\guide{Two distinct ways rotation has entered vision. (1)~As an SSL \emph{objective}:
+RotNet~\cite{rotnet} predicts a single global, discrete image rotation --- an
+absolute, image-level invariance task, fundamentally different from continuous,
+pairwise, relative orientation between parts. Make this distinction explicit; it is
+why RoPART is novel. (2)~As an architectural prior: group-equivariant
+CNNs~\cite{gcnn}, $\mathrm{E}(2)$-steerable CNNs~\cite{e2cnn}, and spatial
+transformer networks~\cite{stn}. Position your project as \emph{learning} relative
+orientation as a target, with steerable architecture noted only as a stretch goal.}
+
+\section{Representing and regressing rotation}
+\guide{Justify the design choice for $\Delta\varphi$. Direct angle regression is
+discontinuous at $\pm\pi$ and a poor neural target; Zhou et al.~\cite{rotcont} show
+why continuous representations are needed, motivating a $(\cos\Delta\varphi,
+\sin\Delta\varphi)$ target with an angle-aware loss. Note that this also dictates how
+intrinsic angular error and the symmetry/consistency metrics must be computed.}
+
+\section{Multi-objective learning and loss balancing}
+\guide{Adding $\Delta\varphi$ alongside $(\Delta x,\Delta y)$ (and possibly scale)
+is a multi-task regression. Discuss why balancing matters --- PART already reports
+inter-channel interference --- and introduce uncertainty-based task
+weighting~\cite{kendall} as the principled option to compare against fixed/scheduled
+weights. This frames loss weighting as a planned experimental variable, not an
+afterthought.}
+
+\section{Orientation-sensitive downstream tasks}
+\guide{Set up the evaluation targets. Explain why orientation matters in aerial,
+microscopy and document domains, and introduce the oriented-detection benchmark
+DOTA~\cite{dota} with an oriented detector such as Oriented R-CNN~\cite{orcnn} as a
+realistic application, alongside a lighter relative-pose probe. Be honest about
+scope: these motivate the \emph{one} real downstream task you will do properly.}
+
+\section{Notation and preliminaries}
+\guide{Optional but recommended (the spec explicitly allows a notation/theory
+section). Define the groups you invoke --- translation subgroup, $\mathrm{SE}(2)$,
+and $\mathrm{Sim}(2)$ once scale is included --- and fix notation for patch pairs
+$(i,j)$, the relative target channels, and the symmetry/compositional-consistency
+relations. Keep it to the minimum the later chapters actually use.}
+
+% =====================================================================
+%  CHAPTER 3 — TECHNICAL ACHIEVEMENTS / PRELIMINARY WORK
+% =====================================================================
+\chapter{Preliminary Work and Feasibility}
+
+\guide{The spec notes MSc Computing students are unlikely to have substantial
+experimental results yet, so keep this chapter short and honest --- it is about
+\emph{feasibility}, not findings. Report only what is genuinely done. Do not
+over-claim.}
+
+\section{Reproducing the PART pipeline on a modern stack}
+\guide{Describe getting the upstream PART implementation running on the current
+stack (Python~3.12, torch~2.x) and the device strategy (Apple-Silicon MPS for
+local development, CUDA/SLURM for full pretraining). Mention the baseline smoke run
+on CIFAR-100 with ViT-S as a feasibility check. Keep specifics light at interim
+stage; the detailed engineering belongs in the final report.}
+
+\section{Towards a translation-only baseline}
+\guide{State the build-order principle: add geometry one channel-group at a time,
+starting from a clean translation-only $(\Delta x,\Delta y)$ baseline (scale
+disabled) as the control everything is measured against, with translational
+negative symmetry as a correctness gate before any rotation work. Note this is
+planned/in-progress rather than completed if that is the case.}
+
+% =====================================================================
+%  CHAPTER 4 — PROJECT PLAN
+% =====================================================================
+\chapter{Project Plan}
+
+\guide{The forward-looking chapter. Make the plan concrete and measurable, and tie
+it back to the objectives in Chapter~1. A reader should finish this chapter knowing
+exactly what you will build, how you will know it worked, and what could go wrong.}
+
+\section{Approach and phases}
+\guide{Lay out the phased plan (reuse the proposal's four-phase structure):
+Phase~0 baseline reproduction + translation-only control; Phase~1 the
+rotation-aware objective $(\Delta x,\Delta y,\Delta\varphi)$ with the interpolation
+control; Phase~2 ablations (angle representation, frame convention, loss weighting,
+and --- last --- whether scale helps); Phase~3 downstream evaluation; Phase~4
+synthesis and writing. Emphasise that every addition is flag-gated so the baseline
+path is unchanged, which keeps any downstream effect cleanly attributable.}
+
+\section{Timeline}
+\guide{Give a week-by-week or phase-by-phase timeline to the deadlines (poster
+2026-09-03, final report 2026-09-10). A simple table is fine; consider
+\texttt{pgfgantt} for a chart. Fill in the milestone rows below.}
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Phase & Weeks & Milestone / deliverable \\
+    \midrule
+    Phase 0 & \textit{[Wk]} & \textit{[baseline reproduced; translation-only control]} \\
+    Phase 1 & \textit{[Wk]} & \textit{[rotation pretext training at scale]} \\
+    Phase 2 & \textit{[Wk]} & \textit{[ablations + intrinsic metrics]} \\
+    Phase 3 & \textit{[Wk]} & \textit{[downstream evaluation]} \\
+    Phase 4 & \textit{[Wk]} & \textit{[synthesis, poster, report]} \\
+    \bottomrule
+  \end{tabular}
+  \caption{Project timeline (to be completed).}
+\end{table}
+
+\section{Evaluation and success criteria}
+\guide{Define what success looks like --- this is explicitly asked for. Separate
+\emph{intrinsic} metrics (angular error on $\Delta\varphi$; rotational negative
+symmetry $\Delta\varphi(i\!\to\!j)=-\Delta\varphi(j\!\to\!i)$; compositional
+consistency) from \emph{downstream} outcomes (a classification no-degradation check
+vs.\ the translation-only baseline; a synthetic orientation probe; one real
+orientation-sensitive task). State the comparison baseline and what counts as a
+positive result.}
+
+\section{Risks and mitigations}
+\guide{Address the validity threats head-on --- markers reward this. The big one is
+the \emph{interpolation confound}: rotating and resampling a small patch leaves a
+blur signature correlated with $\varphi$, so any positive $\Delta\varphi$ result
+needs a matched-interpolation control before it can be claimed as genuine learning.
+Also cover orientation recoverability/well-posedness (the signal is sparser than
+translation and content-dependent --- potentially turned into an orientation-
+uncertainty contribution) and the compute ceiling (full ImageNet-1K ViT-B
+pretraining is out of scope; CIFAR-100 / ViT-S is the workhorse).}
+
+\section{Ethical considerations}
+\guide{Brief but required if relevant. This project uses standard public vision
+benchmarks (CIFAR-100, optionally ImageNet-100, and an aerial-imagery set for the
+downstream task) and no human-subjects or personal data, so Imperial ethical
+approval is most likely \emph{not} required --- state this explicitly and note any
+caveats (e.g.\ licensing/usage terms of the aerial dataset). Confirm against your
+ethics review checklist.}
+
+% =====================================================================
+%  REFERENCES — Vancouver (numbered, in order of appearance)
+% =====================================================================
+\bibliographystyle{unsrtnat} % portable Vancouver-like numbering; swap for vancouver.bst if available
+\bibliography{references}
+
+% =====================================================================
+%  APPENDICES (optional — likely unnecessary for this short document)
+% =====================================================================
+% \appendix
+% \chapter{Supplementary material}
+% \guide{Only if needed: extra figures, full configs, derivations.}
+
+\end{document}
