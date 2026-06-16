@@ -1,0 +1,9 @@
+command: bash ./job_files/train_vit.sh
+description: imageGPT classify 
+is_parent: false
+name: reproduce eeutg443id and xvvkfbjei8 (mp3 + imagenet)
+tags: ['imagenet', 'mp3']
+attribution:
+    project: PORT_ViT_v1
+    fm_development_type: pre_training
+setup_command: bash setup.sh

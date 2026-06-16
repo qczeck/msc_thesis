@@ -1,0 +1,6 @@
+command: bash ./job_files/train_port_v3.sh
+description: imageGPT classify 
+is_parent: false
+name: imgnet_finetune_v3_anycheckpoint_pairwise_mlp + imagenet
+tags: ['imgnet_finetune_v3_anycheckpoint_pairwise_mlp', 'imagenet']
+setup_command: bash setup.sh

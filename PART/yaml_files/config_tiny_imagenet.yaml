@@ -1,0 +1,5 @@
+command: ''
+is_parent: false
+name: ViT base, tiny imagenet 200, default hyper params, patch 4, size 32
+tags: ['tiny imagenet', 'vit base']
+setup_command: 'source /coreflow/venv/bin/activate; aws --endpoint-url /datasets/tiny-imagenet-200.zip . --quiet; unzip -q tiny-imagenet-200.zip'

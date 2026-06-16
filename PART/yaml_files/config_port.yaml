@@ -1,0 +1,8 @@
+command: bash ./job_files/train_port_v3.sh
+description: imageGPT classify
+is_parent: false
+name: cross_attention_v3_v3 reproduce + cifar100
+tags: ['cross_attention_v3_v3', 'reproduce', 'v3']
+permissions:
+  viewers: mlr
+setup_command: bash setup_genclr.sh

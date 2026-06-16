@@ -1,0 +1,8 @@
+command: 'source /miniconda/bin/activate; python3 parent_all_versions_imagenet.py'
+name: imgnet_finetune_v3_anycheckpoint_pairwise_mlp + imagenet
+tags: ['imgnet_finetune_v3_anycheckpoint_pairwise_mlp', 'imagenet', 'a942m5cpqp', 'c79s5b9bgv']
+is_parent: true
+permissions:
+  viewers: mlr
+setup_command: ''
+

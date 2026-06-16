@@ -1,0 +1,6 @@
+command: bash ./job_files/train_supervised.sh
+description: supervised
+is_parent: false
+name: supervised + cifar100
+tags: ['cifar100', 'supervised', 'small4']
+setup_command: 'wget https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz; tar -xzf cifar-100-python.tar.gz'

@@ -1,0 +1,6 @@
+command: bash ./job_files/train_mp3_cifar.sh
+description: mp3 full training
+is_parent: false
+name: mp3 small4 1000 epochs
+tags: ['cifar100', 'vit small', 'small4', '1000epochs', 'full training']
+setup_command: 'wget https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz; tar -xzf cifar-100-python.tar.gz; source /coreflow/venv/bin/activate;'

@@ -1,0 +1,7 @@
+command: 'source /miniconda/bin/activate; python3 parent_all_versions.py'
+name: cross_attention_v3_v3 reproduce + cifar100
+tags: ['cross_attention_v3_v3', 'reproduce', 'cifar100']
+is_parent: true
+permissions:
+  viewers: mlr
+setup_command: ''

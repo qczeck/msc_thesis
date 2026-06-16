@@ -1,0 +1,8 @@
+# command: 'source /coreflow/venv/bin/activate; python3 parent_cifar.py'
+# name: ViT small cifar100 baseline, 4_32, pos pred pretrain
+# tags: ['ViT small cifar100', 'pos pred pretrain']
+command: 'source /coreflow/venv/bin/activate; python3 parent.py'
+name: ViT Base Imagenet SVP
+tags: ['ViT Base Imagenet', 'pos pred pretrain']
+is_parent: true
+setup_command: ''

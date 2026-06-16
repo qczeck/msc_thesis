@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{article}
+
+% -- Preamble (Imperial MSc convention) --
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[british]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue]{hyperref}
+\usepackage{xurl}
+
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.0ex plus .2ex}{0.5ex plus .1ex}
+\setlist{nosep,leftmargin=1.4em}
+
+\setlength{\parskip}{0.6ex}
+
+\title{\vspace{-2.5em}\textbf{Relative Orientation in Off-Grid Self-Supervised Learning:\\
+Extending PART from Translation to Rigid Motion}}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-3.5em}
+
+\noindent\textbf{Maciej Kuczek - MSc Computing Individual Project}\hfill\textbf{Imperial College London}
+
+\vspace{0.8em}
+
+\section{Objective}
+PART~\cite{part} is a self-supervised pretext task that samples patches off-grid and learns the \emph{relative translation} $(\Delta x, \Delta y)$ between random pairs of them, rather than predicting absolute patch positions on a grid as in MAE~\cite{mae}, MP3~\cite{mp3}, and DropPos~\cite{droppos}. Geometrically, its target space is the translation subgroup of the plane. This project asks whether the formulation can be extended to the full group of planar rigid motions, $\mathrm{SE}(2)$, by adding a \emph{relative orientation} target $\Delta\varphi$ to each patch pair. The objective is to design, implement, and evaluate this rotation-aware variant of the pretext task, and to test the hypothesis that supervising relative orientation produces representations with improved performance on orientation-sensitive downstream tasks (oriented object detection and relative-pose estimation) while remaining competitive on global classification. The contribution is methodological: closing the gap between translation-only and rigid-motion relative pretext tasks, and characterising whether the rotational symmetry and consistency structure that PART exhibits for translation is recovered, or breaks down, once orientation is introduced.
+
+\section{Motivation}
+The authors of PART explicitly identify modelling rotations as open future work, using the example that seeing a lip implies a nose above it, but a \emph{rotated} lip implies a \emph{rotated} nose, and ask how the method can be generalised for rotation equivariance (Section~7, Discussion \& Future Work~\cite{part}). Many domains in which precise spatial understanding matters - aerial and satellite imagery, microscopy, histopathology, document analysis - contain objects at arbitrary in-plane orientations, and the dominant orientation of a part relative to its neighbours is frequently the discriminative signal. Grid-based pretext tasks cannot express continuous geometry of this kind, and existing rotation-based self-supervision such as RotNet~\cite{rotnet} predicts a single \emph{absolute, global} rotation applied to the whole image from a coarse set of angles, which is a global-invariance objective rather than a local relational one. PART's continuous, pairwise, off-grid formulation is the natural home for relative orientation, because it already predicts continuous geometric relationships between arbitrary patch pairs without any absolute reference frame. The work also has a clear precedent within the same paper: the authors extended the objective with relative scale and aspect ratio as a proof of concept (Section~5.1(ii), Table~1~\cite{part}), which demonstrates that the relative-target framework is extensible and motivates completing it towards $\mathrm{SE}(2)$ and, in combination with their scale term, the planar similarity group $\mathrm{Sim}(2)$.
+
+\section{Challenges and Issues}
+\begin{enumerate}[label=\textbf{C\arabic*.}]
+  \item \textbf{Multi-objective interference.} The PART authors report that adding scale and aspect-ratio terms converged quickly but \emph{delayed} the convergence of the original $(\Delta x, \Delta y)$ terms (Section~5.1(ii)~\cite{part}). Adding $\Delta\varphi$ risks the same imbalance, so loss weighting - fixed, scheduled, or learned via task-uncertainty weighting~\cite{kendall} - becomes a core experimental variable rather than an afterthought.
+  \item \textbf{Angle parameterisation.} Regressing $\Delta\varphi$ directly is discontinuous at $\pm\pi$ and is known to be a poor target for neural regression; a continuous $(\cos\Delta\varphi, \sin\Delta\varphi)$ representation~\cite{rotcont} with an appropriate angular loss is required, and the choice must be ablated.
+  \item \textbf{Frame convention.} A design decision with real consequences: whether $\Delta\varphi$ simply rotates the reference frame, and whether $(\Delta x, \Delta y)$ should then be expressed in the reference patch's \emph{local rotated frame}. The local-frame formulation is the one that actually encodes the ``rotated-lip implies rotated-nose'' intuition, and likely the more faithful but harder target.
+  \item \textbf{Image-space realisation.} Producing a rotated patch by rotating a square crop introduces empty corners and interpolation artefacts; sampling a larger region and centre-cropping after rotation mitigates this but alters the effective receptive field. Interpolation cues could leak orientation information and must be controlled for as a confound.
+  \item \textbf{Symmetry and consistency.} PART exhibits negative symmetry for translation, $\theta(i{\to}j) = -\theta(j{\to}i)$ (Section~5.1(iv), Figure~6~\cite{part}). The rotational analogue is $\Delta\varphi(i{\to}j) = -\Delta\varphi(j{\to}i)$, ideally with compositional consistency $\Delta\varphi(i{\to}k) \approx \Delta\varphi(i{\to}j) + \Delta\varphi(j{\to}k) \pmod{2\pi}$. Whether the cross-attention encoder learns these is an empirical question and a useful intrinsic evaluation axis.
+  \item \textbf{Compute and benchmark scope.} Full ImageNet-1K ViT-B pretraining in the original setup (8 GPUs, 200--400 epochs~\cite{part}) is infeasible at MSc scale. Development and ablation must run on the cheap CIFAR-100 / ViT-S configuration, with downstream orientation-sensitive evaluation chosen for tractability rather than maximal scale.
+\end{enumerate}
+
+\section{Approach}
+The work builds directly on the authors' open-source implementation\footnote{\url{https://github.com/Melika-Ayoughi/PART}} and proceeds in four phases.
+
+\textbf{Phase 0 - Baseline reproduction.} Reproduce the published PART result on CIFAR-100 with ViT-S (reported 83.0\% at 1000 pretraining epochs, Table~7~\cite{part}) and confirm the translational negative-symmetry property as a correctness gate before any modification. This cheap configuration is the development and ablation engine for the whole project.
+
+\textbf{Phase 1 - Rotation-aware objective.} Extend the target to $\theta = (\Delta x, \Delta y, \Delta\varphi)$, predicting orientation as $(\cos\Delta\varphi, \sin\Delta\varphi)$ through the existing cross-attention relative encoder, and modify the off-grid sampler to apply and record a per-patch in-plane rotation (larger-crop-then-centre-crop to avoid empty corners). Tune the relative loss weighting between translation and orientation.
+
+\textbf{Phase 2 - Ablations.} Systematically vary (i) angle representation (direct vs.\ $(\cos,\sin)$); (ii) frame convention (global vs.\ reference-local rotated frame); (iii) loss weighting (fixed vs.\ uncertainty-weighted~\cite{kendall}); and (iv) presence of the scale term, to test whether translation, rotation, and scale interfere or compose. Intrinsic metrics include translation error (as in the original work), an angular error for $\Delta\varphi$, and the negative-symmetry and compositional-consistency measures defined in C5.
+
+\textbf{Phase 3 - Downstream evaluation.} Verify that classification is not degraded (CIFAR-100, and ImageNet-100 if compute allows), then evaluate orientation sensitivity. The primary orientation-sensitive task is a relative-pose probe (predict relative orientation between regions from frozen features); compute permitting, a constrained oriented-object-detection experiment on a subset of the DOTA aerial benchmark~\cite{dota} with an oriented detection head~\cite{orcnn} provides a realistic application, tying back to PART's own stated relevance to satellite imagery. A \emph{stretch goal} replaces the learned-equivariance head with an architecturally rotation-equivariant encoder built from $\mathrm{E}(2)$-steerable layers~\cite{e2cnn}, contrasting learned versus built-in equivariance.
+
+The work uses PyTorch on a single GPU as the primary resource, with the ViT-S/CIFAR-100 pipeline as the workhorse and any larger run scoped explicitly. Evaluation method and benchmark choice will be agreed with the supervisor early, as required.
+
+\section{Related Work}
+PART~\cite{part} situates itself among local self-supervised pretext tasks that operate on patches: the puzzle-solving and masked-image-modelling lineage including MAE~\cite{mae}, MP3~\cite{mp3}, and DropPos~\cite{droppos}, all of which predict \emph{absolute} grid positions or reconstruct masked content, in contrast to PART's \emph{relative, off-grid} prediction. All operate on the Vision Transformer~\cite{vit} backbone with the DeiT~\cite{deit} training recipe. Rotation has appeared in self-supervision before, most notably RotNet~\cite{rotnet}, but as classification of a single global image rotation into a few discrete angles - an absolute, image-level invariance objective fundamentally different from predicting continuous, pairwise, \emph{relative} orientation between local parts, which is the gap this project addresses. The complementary tradition of building rotation handling into the architecture spans group-equivariant CNNs~\cite{gcnn}, $\mathrm{E}(2)$-steerable CNNs~\cite{e2cnn}, and spatial transformer networks~\cite{stn}; this project's main route instead \emph{learns} relative orientation as a pretext target, with steerable architecture as a stretch comparison. Continuous rotation representation draws on the analysis of discontinuities in rotation regression~\cite{rotcont}, multi-objective balancing on uncertainty-based task weighting~\cite{kendall}, and downstream evaluation on the DOTA oriented-detection benchmark~\cite{dota} with an oriented detector~\cite{orcnn}. To the best of current knowledge, no prior work extends a relative, off-grid patch-pair pretext task to predict relative orientation, making the rigid-motion generalisation of PART a novel and self-contained MSc-scale contribution.
+
+% -- Vancouver-style numbered references (by order of appearance) --
+\begin{thebibliography}{99}
+\setlength{\itemsep}{0pt}
+
+\bibitem{part} Ayoughi M, Abnar S, Huang C, Sandino C, Lala S, Dhekane EG, et al. How PARTs assemble into wholes: Learning the relative composition of images. In: Proceedings of the 7th Northern Lights Deep Learning Conference (NLDL), PMLR 307; 2026. arXiv:2506.03682v2.
+
+\bibitem{mae} He K, Chen X, Xie S, Li Y, Doll\'ar P, Girshick R. Masked autoencoders are scalable vision learners. In: CVPR; 2022.
+
+\bibitem{mp3} Zhai S, Jaitly N, Ramapuram J, Busbridge D, Likhomanenko T, Cheng JY, et al. Position prediction as an effective pretraining strategy. In: ICML; 2022.
+
+\bibitem{droppos} Wang H, Fan J, Wang Y, Song K, Wang T, Zhang Z. DropPos: Pre-training vision transformers by reconstructing dropped positions. In: NeurIPS; 2023.
+
+\bibitem{rotnet} Gidaris S, Singh P, Komodakis N. Unsupervised representation learning by predicting image rotations. In: ICLR; 2018.
+
+\bibitem{kendall} Kendall A, Gal Y, Cipolla R. Multi-task learning using uncertainty to weigh losses for scene geometry and semantics. In: CVPR; 2018.
+
+\bibitem{rotcont} Zhou Y, Barnes C, Lu J, Yang J, Li H. On the continuity of rotation representations in neural networks. In: CVPR; 2019.
+
+\bibitem{vit} Dosovitskiy A, Beyer L, Kolesnikov A, Weissenborn D, Zhai X, Unterthiner T, et al. An image is worth 16x16 words: Transformers for image recognition at scale. In: ICLR; 2021.
+
+\bibitem{deit} Touvron H, Cord M, Douze M, Massa F, Sablayrolles A, J\'egou H. Training data-efficient image transformers \& distillation through attention. In: ICML; 2021.
+
+\bibitem{dota} Xia GS, Bai X, Ding J, Zhu Z, Belongie S, Luo J, et al. DOTA: A large-scale dataset for object detection in aerial images. In: CVPR; 2018.
+
+\bibitem{orcnn} Xie X, Cheng G, Wang J, Yao X, Han J. Oriented R-CNN for object detection. In: ICCV; 2021.
+
+\bibitem{gcnn} Cohen TS, Welling M. Group equivariant convolutional networks. In: ICML; 2016.
+
+\bibitem{e2cnn} Weiler M, Cesa G. General $\mathrm{E}(2)$-equivariant steerable CNNs. In: NeurIPS; 2019.
+
+\bibitem{stn} Jaderberg M, Simonyan K, Zisserman A, Kavukcuoglu K. Spatial transformer networks. In: NeurIPS; 2015.
+
+\end{thebibliography}
+
+\end{document}

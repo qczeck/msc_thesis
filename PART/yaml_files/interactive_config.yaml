@@ -1,0 +1,4 @@
+name: 'New Interactive session'
+
+setup_command: 'wget https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz; tar -xzf cifar-100-python.tar.gz'
+command: 'echo NOOP'
