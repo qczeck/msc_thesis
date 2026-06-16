@@ -1,0 +1,64 @@
+# ── Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ── ML runs / data / artefacts (regenerable — keep out of git) ──────
+data/                 # CIFAR-100 download + extracted files (~150MB, regenerable)
+out_*/                # run output dirs (out_smoke/, out_rot/, ...)
+runs/
+checkpoints/
+wandb/                # W&B local logs (we run WANDB_MODE=offline)
+*.pth                 # checkpoints
+*.ckpt
+*.pt
+*.npz
+*.npy
+
+# ── LaTeX build artefacts (in latex/) ──────────────────────────────
+# NB: compiled .pdf files are intentionally NOT ignored — they live in latex/.
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.synctex.gz
+*.toc
+*.nav
+*.snm
+*.vrb
+*.run.xml
+*.bcf
+
+# ── macOS ──────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ── VSCode ─────────────────────────────────────────────────────────
+.vscode/
+# If you ever want to share editor settings, replace the line above with
+# selective ignores and commit the rest, e.g.:
+#   .vscode/*
+#   !.vscode/settings.json
+#   !.vscode/extensions.json
+
+# ── Optional: upstream PART figures (~3MB, not needed for the project) ─
+# Uncomment if you'd rather not vendor them:
+# PART/PART.jpg
+# PART/method.jpg
