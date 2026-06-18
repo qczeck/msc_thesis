@@ -89,7 +89,8 @@ name PART~\cite{part} as the immediate starting point. State the one-sentence
 gap up front: PART predicts relative \emph{translation} only, and orientation is
 left as future work.}
 
-The deep learning revolution of the last decade was made possible by a combination of three factors. One, advances in graphical processing units (GPUs) and parallel computing allowed for faster processing of large amounts of data. Second, architectural advances such as convolutional neural networks (CNNs), new regularisation techniques, and better activation functions improved the trainability and reliability of models. Third, large amounts of labelled training data allowed the models to actually learn rather than memorise. In 2026, compute is still growing thanks to companies such as Nvidia and AMD. Frontier labs such as OpenAI or DeepMind are hard at work researching new architectures and techniques. Labelled data, however, remains elusive and expensive, often requiring alternative approaches. One such approach is self-supervised learning (SSL), which relies on leveraging unlabelled data and pretext tasks which when solved, provide a supervisory signal to the network. \\
+The deep learning revolution of the last decade was made possible by a combination of three factors. One, advances in graphical processing units (GPUs) and parallel computing allowed for faster processing of large amounts of data. Second, architectural advances such as convolutional neural networks (CNNs), new regularisation techniques, and better activation functions improved the trainability and reliability of models. Third, large amounts of labelled training data allowed the models to actually learn rather than memorise. In 2026, compute is still growing thanks to companies such as Nvidia and AMD. Frontier labs such as OpenAI or DeepMind are hard at work researching new architectures and techniques. Labelled data, however, remains elusive and expensive, often requiring alternative approaches. One such approach is self-supervised learning (SSL), which relies on leveraging unlabelled data and pretext tasks which when solved, provide a supervisory signal to the network.
+
 There are many different types of pretext tasks - some remove parts of an image, some rotate the image, some remove colour - but the goal is the same, to force the network to learn complex representations of images without a human label. In particular, spatial/position pretext tasks are important as the image composition and the relationship of objects in an image can be a powerful source of information. PART (PAirwise Relative Translations) is one such pretraining method that leverages relative transformations between two image patches. That method predicts relative translation only ($\Delta x,\Delta y$) with rotation left as future work - this is the goal of this project.
 
 \section{Problem and context}
@@ -101,32 +102,15 @@ unfinished step is the full group of planar rigid motions $\mathrm{SE}(2)$. Ment
 that the PART authors themselves flag ``modelling rotations'' as open future work
 (their Section~7) and the ``rotated lip implies a rotated nose'' intuition.}
 
-Most spatial aware tasks involve a grid structure. Masked AutoEndoder (MAE) slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. PropPos masks some patches on a grid then drops information about  absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Unsupervised Visual Representation Learning by Context Prediction tasks the model with predicting the relative position of patches while still being confined to a grid. The novel contribution of PART is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Extending the task to also include rotation is left as future work and has the potential to improve the learned representation, especially for orientation-sensitive tasks such as pose estimation or oriented object detection.
+Most spatial aware tasks involve a grid structure. Masked AutoEndoder (MAE) slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. DropPos masks some patches on a grid then drops information about  absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Unsupervised Visual Representation Learning by Context Prediction tasks the model with predicting the relative position of patches while still being confined to a grid. The novel contribution of PART is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Extending the task to also include rotation is left as future work and has the potential to improve the learned representation, especially for orientation-sensitive tasks such as pose estimation or oriented object detection. To the best of current knowledge, no prior work extends relative off-grid patch-pair pretext task to relative orientation.
 
 \section{Aims and objectives}
-\guide{State the research question crisply: does adding a relative orientation
-target $\Delta\varphi$ to each patch pair yield representations that are better on
-orientation-sensitive downstream tasks \emph{without} degrading classification?
-List 3--4 concrete objectives (design the rotation-aware pretext; implement it
-behind a flag; characterise whether $\Delta\varphi$ actually learns; evaluate
-downstream vs.\ a translation-only baseline). Keep it tight --- this is a promise
-you will measure yourself against in Chapter~4.}
-
-The research question can be summarised as follows: does adding a relative orientation target ($\Delta \varphi$) to each patch pair yield representations that perform better on orientation-sensitive downstream tasks without degrading classification. In order to do so a new pretext task will be designed which adds rotation on top of translation. Rotation may introduce artifacts such as missing corners or jagged pixels - those will have to be accounted for - therefore a starting point may be to limit the angles to $0^{\circ}, 90^{\circ}, 180^{\circ}, 270^{\circ}$. Afterwards, a Vision Transformer (ViT) will be trained on the pretext task and evaluation will be carried out. 
-
-\section{Contributions}
-\guide{Bullet the intended deliverables (you can reuse the four from the proposal):
-(1)~RoPART, a continuous-rotation pretext $(\Delta x,\Delta y,\Delta\varphi)$
-behind a flag; (2)~an intrinsic characterisation of whether $\Delta\varphi$ learns,
-with the interpolation confound controlled; (3)~downstream evaluation vs.\ the
-translation-only baseline; (4)~a reproducible artefact. Frame the contribution as
-\emph{methodological} --- completing the relative pretext task towards rigid motion
---- not a benchmark-chasing exercise.}
-
-The contributions are as follows:
+The research question can be summarised as follows: does adding a relative orientation target ($\Delta \varphi$) to each patch pair yield representations that  perform better on orientation-sensitive downstream tasks without degrading classification? To answer it, the following objectives will be pursued:
 \begin{itemize}
-    \item A rotation-oriented pretext task taking into account possible issues such as angle representation, rotation artifacts, and missing corners.
-    \item Pretrained Vision Transformer (ViT) model acting as backbone for downstream evaluation.
+    \item Design a new pretext task that adds rotation on top of translation, accounting for artefacts such as missing corners or jagged pixels, and introducing an angle-aware loss function.
+    \item Implement the rotation target behind a flag so that the translation-only baseline path is unchanged, keeping any downstream effect cleanly attributable to the orientation channel.
+    \item Train a Vision Transformer on the pretext task and characterise the angle channel, under appropriate controls, to verify whether the model is learning and whether its predictions obey the geometry that the true relative orientation must obey.
+    \item Evaluate downstream against the translation-only baseline on a classification no-degradation check and an orientation-sensitive task.
 \end{itemize}
 
 % =====================================================================
