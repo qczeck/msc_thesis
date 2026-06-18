@@ -101,7 +101,7 @@ unfinished step is the full group of planar rigid motions $\mathrm{SE}(2)$. Ment
 that the PART authors themselves flag ``modelling rotations'' as open future work
 (their Section~7) and the ``rotated lip implies a rotated nose'' intuition.}
 
-Most spatial aware tasks involve a grid structure. Masked AutoEndoder (MAE) slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. PropPos masks some patches on a grid then drops information about  absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Unsupervised Visual Representation Learning by Context Prediction tasks the model with predicting the relative position of patches while still being confined to a grid. The novel contribution of PART is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Extending the task to also include rotation is left as future work and has the potential to improve the learned representation.
+Most spatial aware tasks involve a grid structure. Masked AutoEndoder (MAE) slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. PropPos masks some patches on a grid then drops information about  absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Unsupervised Visual Representation Learning by Context Prediction tasks the model with predicting the relative position of patches while still being confined to a grid. The novel contribution of PART is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Extending the task to also include rotation is left as future work and has the potential to improve the learned representation, especially for orientation-sensitive tasks such as pose estimation or oriented object detection.
 
 \section{Aims and objectives}
 \guide{State the research question crisply: does adding a relative orientation
@@ -112,7 +112,7 @@ behind a flag; characterise whether $\Delta\varphi$ actually learns; evaluate
 downstream vs.\ a translation-only baseline). Keep it tight --- this is a promise
 you will measure yourself against in Chapter~4.}
 
-The aim of this project is to design a pretext task that adds rotation to the pretext tasks featured in PART paper. The reason to do so is that some downstream, orientation-sensitive tasks may benefit from a representations obtained by training a model on such task. Once a model is trained on the task, downstream evaluation will be carried out.
+The research question can be summarised as follows: does adding a relative orientation target ($\Delta \varphi$) to each patch pair yield representations that perform better on orientation-sensitive downstream tasks without degrading classification. In order to do so a new pretext task will be designed which adds rotation on top of translation. Rotation may introduce artifacts such as missing corners or jagged pixels - those will have to be accounted for - therefore a starting point may be to limit the angles to $0^{\circ}, 90^{\circ}, 180^{\circ}, 270^{\circ}$. Afterwards, a Vision Transformer (ViT) will be trained on the pretext task and evaluation will be carried out. 
 
 \section{Contributions}
 \guide{Bullet the intended deliverables (you can reuse the four from the proposal):
@@ -125,8 +125,8 @@ translation-only baseline; (4)~a reproducible artefact. Frame the contribution a
 
 The contributions are as follows:
 \begin{itemize}
-    \item A rotation-oriented pretext task.
-    \item Downstream evaluation with the translation only-baseline
+    \item A rotation-oriented pretext task taking into account possible issues such as angle representation, rotation artifacts, and missing corners.
+    \item Pretrained Vision Transformer (ViT) model acting as backbone for downstream evaluation.
 \end{itemize}
 
 % =====================================================================
