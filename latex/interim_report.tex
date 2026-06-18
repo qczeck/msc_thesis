@@ -104,15 +104,13 @@ The research question can be summarised as follows: does adding a relative orien
 % =====================================================================
 \chapter{Background and Literature Review}
 
-\guide{This is the heart of the interim report and the chapter most directly
-reusable in the final report. Aim for a \emph{narrative} that converges on PART and
-the rotation gap, not a list of paper summaries. Roughly 6--9 pages. Start from
-the ``essential'' tier of the background reading.}
 
 \section{Self-supervised representation learning}
 \guide{Briefly motivate SSL: learn transferable features from unlabelled images via
 a pretext task, then transfer/fine-tune. Place pretext tasks in context and lead
 into the spatial family. Keep this short --- it is scene-setting, not the focus.}
+
+Self-supervised learning (SSL) is a learning paradigm where the supervisory tasks is generated from data itself, without needing a human-assigned label \cite{ozbulak2023knowselfsupervisedlearningsurvey}. SSL approaches can be grouped into either generative or discriminative. The goal of generative approaches is to learn distributions over a collection of data in pixel space, whereas discriminative approaches' goal is to learn representations of data with high discriminative power (similarly to supervised approaches, just without human labels). 
 
 \section{Spatial and position-based pretext tasks}
 \guide{The lineage that produces PART. Start with relative context prediction
@@ -135,6 +133,14 @@ $(\Delta w,\Delta h)$ as a proof of concept that the target framework is extensi
 $\Delta x/\Delta y$ convergence; (v)~the negative-symmetry property
 $\theta(i\!\to\!j)=-\theta(j\!\to\!i)$ and the patch-uncertainty capability. End by
 naming the rotation gap their Section~7 leaves open --- this is your wedge.}
+
+\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations is a pretraining method that is not based on a grid. Given that this paper is the base of this project, a more detailed treatment is required.
+
+First, given an image, $N$ random patches are extracted, where the top-left coordinates of patch $s$, $(x_s,y_s)$ are drawn uniformly across the image. The patches are of size $P$ (therefore, the bottom-right coordinates are given by $(x_s+P,y_s+P)$). Because the patches are sampled uniformly and off-grid, masking occurs naturally. 
+
+Overall, $N=\frac{H\times W}{P^2}$ patches are sampled and reshaped into the original image size $\hat{I}\in \mathbb{R}^{H\times W\times C}$ where $C$ is the number of channels. 
+
+
 
 \section{Rotation in self-supervision and in architectures}
 \guide{Two distinct ways rotation has entered vision. (1)~As an SSL \emph{objective}:
