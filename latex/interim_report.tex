@@ -89,6 +89,9 @@ name PART~\cite{part} as the immediate starting point. State the one-sentence
 gap up front: PART predicts relative \emph{translation} only, and orientation is
 left as future work.}
 
+The deep learning revolution of the last decade was made possible by a combination of three factors. One, advances in graphical processing units (GPUs) and parallel computing allowed for faster processing of large amounts of data. Second, architectural advances such as convolutional neural networks (CNNs), new regularisation techniques, and better activation functions improved the trainability and reliability of models. Third, large amounts of labelled training data allowed the models to actually learn rather than memorise. In 2026, compute is still growing thanks to companies such as Nvidia and AMD. Frontier labs such as OpenAI or DeepMind are hard at work researching new architectures and techniques. Labelled data, however, remains elusive and expensive, often requiring alternative approaches. One such approach is self-supervised learning (SSL), which relies on leveraging unlabelled data and pretext tasks which when solved, provide a supervisory signal to the network. \\
+There are many different types of pretext tasks - some remove parts of an image, some rotate the image, some remove colour - but the goal is the same, to force the network to learn complex representations of images without a human label. In particular, spatial/position pretext tasks are important as the image composition and the relationship of objects in an image can be a powerful source of information. PART (PAirwise Relative Translations) is one such pretraining method that leverages relative transformations between two image patches. That method predicts relative translation only ($\Delta x,\Delta y$) with rotation left as future work - this is the goal of this project.
+
 \section{Problem and context}
 \guide{Set the scene properly. Contrast \emph{absolute} grid-position pretext tasks
 (MAE~\cite{mae}, MP3~\cite{mp3}, DropPos~\cite{droppos}) with PART's
@@ -97,6 +100,8 @@ PART's target space is the translation subgroup of the plane, and that the natur
 unfinished step is the full group of planar rigid motions $\mathrm{SE}(2)$. Mention
 that the PART authors themselves flag ``modelling rotations'' as open future work
 (their Section~7) and the ``rotated lip implies a rotated nose'' intuition.}
+
+Most spatial aware tasks involve a grid structure. Masked AutoEndoder (MAE) slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. PropPos masks some patches on a grid then drops information about  absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Unsupervised Visual Representation Learning by Context Prediction tasks the model with predicting the relative position of patches while still being confined to a grid. The novel contribution of PART is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Extending the task to also include rotation is left as future work and has the potential to improve the learned representation.
 
 \section{Aims and objectives}
 \guide{State the research question crisply: does adding a relative orientation
@@ -107,6 +112,8 @@ behind a flag; characterise whether $\Delta\varphi$ actually learns; evaluate
 downstream vs.\ a translation-only baseline). Keep it tight --- this is a promise
 you will measure yourself against in Chapter~4.}
 
+The aim of this project is to design a pretext task that adds rotation to the pretext tasks featured in PART paper. The reason to do so is that some downstream, orientation-sensitive tasks may benefit from a representations obtained by training a model on such task. Once a model is trained on the task, downstream evaluation will be carried out.
+
 \section{Contributions}
 \guide{Bullet the intended deliverables (you can reuse the four from the proposal):
 (1)~RoPART, a continuous-rotation pretext $(\Delta x,\Delta y,\Delta\varphi)$
@@ -116,8 +123,11 @@ translation-only baseline; (4)~a reproducible artefact. Frame the contribution a
 \emph{methodological} --- completing the relative pretext task towards rigid motion
 --- not a benchmark-chasing exercise.}
 
-\section{Report structure}
-\guide{One short paragraph signposting Chapters~2--4. Optional but reads well.}
+The contributions are as follows:
+\begin{itemize}
+    \item A rotation-oriented pretext task.
+    \item Downstream evaluation with the translation only-baseline
+\end{itemize}
 
 % =====================================================================
 %  CHAPTER 2 — BACKGROUND AND LITERATURE REVIEW
