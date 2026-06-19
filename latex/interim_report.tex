@@ -22,6 +22,8 @@
 \usepackage[margin=2.5cm]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\graphicspath{{figures/}}
+\usepackage[section]{placeins} % confine floats to the section they appear in
 \usepackage{booktabs}
 \usepackage{enumitem}
 \usepackage{xcolor}
@@ -124,9 +126,61 @@ MP3~\cite{mp3}, DropPos~\cite{droppos}. The key axis to draw out: these predict
 PART predicts \emph{relative} geometry between off-grid pairs. This contrast is the
 backbone of your argument.}
 
-The idea that the context could be a powerful self-supervisory signal comes from text processing. Having a model learn to predict the words surrounding any given word could lead to powerful, transferable insights. Doersch et al \cite{context2015} extended this idea to images by asking a Convolutional Neural Network (CNN) to predict the relative position of a reference patch given a target patch. This works because, for example, to predict that a patch containing a cat's left ear is to the top left of a patch containing a cat's nose the model has to build a correct representation of an object and its constituent parts. This idea was extended further by \cite{jigsaw} where the pretext task was to solve a "jigsaw" puzzle where the model had to reassemble a picture that was sliced into patches along a grid and then shuffled. Once again, by the learned representations used to solve this pretext task captured semantically relevant content. 
+The idea that the context could be a powerful self-supervisory signal comes from text processing. Having a model learn to predict the words surrounding any given word could lead to powerful, transferable insights. Doersch et al \cite{context2015} extended this idea to images by asking a Convolutional Neural Network (CNN) to predict the relative position of a reference patch given a target patch (Figure~\ref{fig:doersch}). This works because, for example, to predict that a patch containing a cat's left ear is to the top left of a patch containing a cat's nose the model has to build a correct representation of an object and its constituent parts. This idea was extended further by \cite{jigsaw} where the pretext task was to solve a "jigsaw" puzzle where the model had to reassemble a picture that was sliced into patches along a grid and then shuffled (Figure~\ref{fig:jigsaw}). Once again, by the learned representations used to solve this pretext task captured semantically relevant content.
 
-In the transformer era, computer vision also took inspiration from NLP, this time leveraging masking. Masked AutoEncoder \cite{mae} constructs a pretext task by masking out a subset of patches at random and then asks a vision transformer to reconstruct the missing patches - this is a generative approach operating at pixel level. Notably, the patches are still confined to a fixed grid. MP3 \cite{mp3} is an example of vision transformer solving a position prediction pretext task - its goal is to predict the absolute position of a patch on a grid. The authors achieve that by removing positions, selecting random context tokens and then tasking the model with predicting absolute positions for each token. While MP3 drops all position embeddings, DropPos \cite{droppos} drops a subset of positional embeddings, keeping the remaining ones as "anchors". 
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.45\textwidth]{Doersch.png}
+  \caption[Relative context prediction]{Relative context prediction of Doersch et
+  al.~\cite{context2015}: given a reference patch (centre) and a neighbouring patch,
+  the network predicts which of the eight surrounding grid positions the
+  neighbour occupies. The positions remain confined to a fixed grid relative to the
+  reference. Figure reproduced from~\cite{context2015}.}
+  \label{fig:doersch}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\textwidth]{Jigsaw.png}
+  \caption[Jigsaw puzzle pretext task]{The jigsaw pretext task of Noroozi \&
+  Favaro~\cite{jigsaw}: an image is sliced into grid tiles which are shuffled
+  according to a permutation, and the network must recover the permutation that
+  reassembles the original image. As with context prediction, the tiles are tied to a
+  fixed grid. Figure reproduced from~\cite{jigsaw}.}
+  \label{fig:jigsaw}
+\end{figure}
+
+In the transformer era, computer vision also took inspiration from NLP, this time leveraging masking. Masked AutoEncoder \cite{mae} constructs a pretext task by masking out a subset of patches at random and then asks a vision transformer to reconstruct the missing patches - this is a generative approach operating at pixel level (Figure~\ref{fig:mae}). Notably, the patches are still confined to a fixed grid. MP3 \cite{mp3} is an example of vision transformer solving a position prediction pretext task - its goal is to predict the absolute position of a patch on a grid (Figure~\ref{fig:mp3}). The authors achieve that by removing positions, selecting random context tokens and then tasking the model with predicting absolute positions for each token. While MP3 drops all position embeddings, DropPos \cite{droppos} drops a subset of positional embeddings, keeping the remaining ones as "anchors" (Figure~\ref{fig:droppos}).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\textwidth]{MAE.png}
+  \caption[Masked Autoencoder]{The Masked Autoencoder (MAE)~\cite{mae}: a large
+  fraction of grid patches is masked, an encoder processes the visible patches, and
+  a lightweight decoder reconstructs the missing pixels. The objective is generative
+  (pixel reconstruction) and operates on a fixed grid. Figure reproduced
+  from~\cite{mae}.}
+  \label{fig:mae}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\textwidth]{MP3.png}
+  \caption[MP3 position prediction]{MP3~\cite{mp3}: all positional embeddings are
+  removed and the network must predict the \emph{absolute} grid position of each
+  token from content alone. Figure reproduced from~\cite{mp3}.}
+  \label{fig:mp3}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.72\textwidth]{DropPos.png}
+  \caption[DropPos]{DropPos~\cite{droppos}: only a subset of positional embeddings is
+  dropped, with the retained embeddings acting as anchors against which the dropped
+  positions are recovered. The task remains one of predicting absolute positions on a
+  fixed grid. Figure reproduced from~\cite{droppos}.}
+  \label{fig:droppos}
+\end{figure}
 
 Crucially, all methods mentioned above are confined to a fixed grid and predict positions or reconstruct masked content on that fixed grid.
 
@@ -142,7 +196,19 @@ $\Delta x/\Delta y$ convergence; (v)~the negative-symmetry property
 $\theta(i\!\to\!j)=-\theta(j\!\to\!i)$ and the patch-uncertainty capability. End by
 naming the rotation gap their Section~7 leaves open --- this is your wedge.}
 
-\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations is a pretraining method that is not based on a grid. Given that this paper is the base of this project, a more detailed treatment is required.
+\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations is a pretraining method that is not based on a grid (Figure~\ref{fig:part}). Given that this paper is the base of this project, a more detailed treatment is required.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{PART.jpg}
+  \caption[The PART pipeline]{The PART pipeline~\cite{part}: patches are sampled at
+  random continuous (off-grid) positions and embedded by a ViT \emph{without}
+  positional embeddings; a cross-attention relative encoder then predicts the
+  relative translation $(\Delta x,\Delta y)$ between sampled patch pairs, supervised
+  with an MSE loss. The geometry of the pair, rather than an absolute grid position,
+  provides the supervisory signal. Figure reproduced from~\cite{part}.}
+  \label{fig:part}
+\end{figure}
 
 First, given an image, $N$ random patches are extracted, where the top-left coordinates of patch $s$, $(x_s,y_s)$ are drawn uniformly across the image. The patches are of size $P$ (therefore, the bottom-right coordinates are given by $(x_s+P,y_s+P)$). Because the patches are sampled uniformly and off-grid, masking occurs naturally. Note that no positional embeddings are used.
 
@@ -175,7 +241,18 @@ CNNs~\cite{gcnn}, $\mathrm{E}(2)$-steerable CNNs~\cite{e2cnn}, and spatial
 transformer networks~\cite{stn}. Position your project as \emph{learning} relative
 orientation as a target, with steerable architecture noted only as a stretch goal.}
 
-Rotation can be an SSL objective in itself. In RotNet \cite{rotnet} the whole image is rotated globally by $0^{\circ},90^{\circ},180^{\circ},270^{\circ}$. This approach does not introduce low-level visual artefacts and exhibits well-posedness. Interestingly, adding rotations of $45^{\circ},135^{\circ},225^{\circ},315^{\circ}$ degrades CIFAR-10 classification accuracy - the authors attribute this degradation to the fact that 8 rotations are not distinguishable enough and/or the fact that visual artefacts are introduced. Note that this is a global approach and this project aims for a localised one.
+Rotation can be an SSL objective in itself. In RotNet \cite{rotnet} the whole image is rotated globally by $0^{\circ},90^{\circ},180^{\circ},270^{\circ}$ and the network must classify which of the four rotations was applied (Figure~\ref{fig:rotnet}). This approach does not introduce low-level visual artefacts and exhibits well-posedness. Interestingly, adding rotations of $45^{\circ},135^{\circ},225^{\circ},315^{\circ}$ degrades CIFAR-10 classification accuracy - the authors attribute this degradation to the fact that 8 rotations are not distinguishable enough and/or the fact that visual artefacts are introduced. Note that this is a global approach and this project aims for a localised one.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\textwidth]{RotNet.png}
+  \caption[RotNet]{RotNet~\cite{rotnet}: the input image is rotated by one of four
+  multiples of $90^{\circ}$ and the network is trained to recognise the applied
+  rotation. The target is a single \emph{global}, \emph{discrete}, image-level
+  rotation --- in contrast to the continuous, pairwise, part-relative orientation
+  this project proposes. Figure reproduced from~\cite{rotnet}.}
+  \label{fig:rotnet}
+\end{figure}
 
 \section{Representing and regressing rotation}
 \guide{Justify the design choice for $\Delta\varphi$. Direct angle regression is
