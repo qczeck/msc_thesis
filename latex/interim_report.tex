@@ -112,7 +112,7 @@ The research question can be summarised as follows: does adding a relative orien
 a pretext task, then transfer/fine-tune. Place pretext tasks in context and lead
 into the spatial family. Keep this short --- it is scene-setting, not the focus.}
 
-Self-supervised learning (SSL) is a learning paradigm where the supervisory tasks is generated from data itself, without needing a human-assigned label \cite{sslsurvey}. SSL approaches can be grouped into either generative or discriminative. The goal of generative approaches is to learn distributions over a collection of data in pixel space, whereas discriminative approaches' goal is to learn representations of data with high discriminative power (similarly to supervised approaches, just without human labels). 
+Self-supervised learning (SSL) is a learning paradigm where the supervisory tasks is generated from data itself, without needing a human-assigned label \cite{sslsurvey}. SSL approaches can be grouped into either generative or discriminative. The goal of generative approaches is to learn distributions over a collection of data in pixel space, whereas discriminative approaches' goal is to learn representations of data with high discriminative power (similarly to supervised approaches, just without human labels). PART and the extension proposed in this project are examples of discriminative approaches.
 
 \section{Spatial and position-based pretext tasks}
 \guide{The lineage that produces PART. Start with relative context prediction
@@ -126,7 +126,7 @@ backbone of your argument.}
 
 The idea that the context could be a powerful self-supervisory signal comes from text processing. Having a model learn to predict the words surrounding any given word could lead to powerful, transferable insights. Doersch et al \cite{context2015} extended this idea to images by asking a Convolutional Neural Network (CNN) to predict the relative position of a reference patch given a target patch. This works because, for example, to predict that a patch containing a cat's left ear is to the top left of a patch containing a cat's nose the model has to build a correct representation of an object and its constituent parts. This idea was extended further by \cite{jigsaw} where the pretext task was to solve a "jigsaw" puzzle where the model had to reassemble a picture that was sliced into patches along a grid and then shuffled. Once again, by the learned representations used to solve this pretext task captured semantically relevant content. 
 
-In the transformer era, computer vision also took inspiration from NLP, this time leveraging masking. Masked AutoEncoder \cite{mae} constructs a pretext task by masking out a subset of patches at random and then asks a vision transformer to reconstruct the missing patches. Notably, the patches are still confined to a fixed grid. MP3 \cite{mp3} is an example of vision transformer solving a position prediction pretext task - its goal is to predict the absolute position of a patch on a grid. The authors achieve that by removing positions, selecting random context tokens and then tasking the model with predicting absolute positions for each token. While MP3 drops all position embeddings, DropPos \cite{droppos} drops a subset of positional embeddings, keeping the remaining ones as "anchors". 
+In the transformer era, computer vision also took inspiration from NLP, this time leveraging masking. Masked AutoEncoder \cite{mae} constructs a pretext task by masking out a subset of patches at random and then asks a vision transformer to reconstruct the missing patches - this is a generative approach operating at pixel level. Notably, the patches are still confined to a fixed grid. MP3 \cite{mp3} is an example of vision transformer solving a position prediction pretext task - its goal is to predict the absolute position of a patch on a grid. The authors achieve that by removing positions, selecting random context tokens and then tasking the model with predicting absolute positions for each token. While MP3 drops all position embeddings, DropPos \cite{droppos} drops a subset of positional embeddings, keeping the remaining ones as "anchors". 
 
 Crucially, all methods mentioned above are confined to a fixed grid and predict positions or reconstruct masked content on that fixed grid.
 
@@ -161,7 +161,9 @@ The authors also show that the framework is extensible by adding relative scale 
 $$\theta_{\text{ref},\text{tgt}}=\begin{bmatrix} \Delta x \\ \Delta y \\ \Delta w \\ \Delta h \end{bmatrix}_{\text{ref},\text{tgt}}=\begin{bmatrix} (x_\text{tgt}-x_\text{ref})/w_{\text{ref}} \\ (y_\text{tgt}-y_\text{ref})/h_\text{ref} \\ w_\text{tgt}/w_\text{ref} \\ h_\text{tgt}/h_\text{ref} \end{bmatrix}_{\text{ref},\text{tgt}}$$
 The authors note that this delays the convergence of $\Delta x,\Delta y$ compared to the baseline. 
 
-Crucially, the model learns symmetrical relationships, i.e. if patch $P_i$ predicts $(\Delta x,\Delta y)$ relative to $P_j$, then $P_j$ predicts $(-\Delta x,-\Delta y)$ relative to $P_i$.
+Crucially, the model learns symmetrical relationships, i.e. if patch $P_i$ predicts $(\Delta x,\Delta y)$ relative to $P_j$, then $P_j$ predicts $(-\Delta x,-\Delta y)$ relative to $P_i$. The method is also capable of estimating patch uncertainty by checking the agreement of different reference patches on the relative position of a target patch - with "easy" patches being consistently placed at the same location.
+
+The authors conclude the paper with several future directions such as hierarchical multi-scale learning, extensions to other tasks, and - most importantly to this project - modelling rotations.
 
 \section{Rotation in self-supervision and in architectures}
 \guide{Two distinct ways rotation has entered vision. (1)~As an SSL \emph{objective}:
@@ -173,7 +175,7 @@ CNNs~\cite{gcnn}, $\mathrm{E}(2)$-steerable CNNs~\cite{e2cnn}, and spatial
 transformer networks~\cite{stn}. Position your project as \emph{learning} relative
 orientation as a target, with steerable architecture noted only as a stretch goal.}
 
-Rotation can be an SSL objective in itself. In RotNet \cite{rotnet} the whole image is rotated globally by $0^{\circ},90^{\circ},180^{\circ},270^{\circ}$. This approach does not introduce low-level visual artefacts and exhibits well-posedness. Interestingly, adding rotations of $45^{\circ},135^{\circ},225^{\circ},315^{\circ}$ degrades CIFAR-10 classification accuracy - the authors attribute this degradation to the fact that 8 rotations are not distinguishable enough and/or the fact that visual artefacts are introduced. 
+Rotation can be an SSL objective in itself. In RotNet \cite{rotnet} the whole image is rotated globally by $0^{\circ},90^{\circ},180^{\circ},270^{\circ}$. This approach does not introduce low-level visual artefacts and exhibits well-posedness. Interestingly, adding rotations of $45^{\circ},135^{\circ},225^{\circ},315^{\circ}$ degrades CIFAR-10 classification accuracy - the authors attribute this degradation to the fact that 8 rotations are not distinguishable enough and/or the fact that visual artefacts are introduced. Note that this is a global approach and this project aims for a localised one.
 
 \section{Representing and regressing rotation}
 \guide{Justify the design choice for $\Delta\varphi$. Direct angle regression is
