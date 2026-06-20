@@ -88,12 +88,12 @@ The deep learning revolution of the last decade was made possible by a combinati
 
 In 2026, compute is still growing thanks to companies such as Nvidia and AMD. Frontier labs such as OpenAI or DeepMind are hard at work researching new architectures and techniques. Labelled data, however, remains elusive and expensive, often requiring alternative approaches. One such approach is self-supervised learning (SSL), which relies on leveraging unlabelled data and pretext tasks which, when solved, provide a supervisory signal to the network.
 
-There are many different types of pretext tasks - some remove parts of an image, some rotate the image, some remove colour - but the goal is the same: to force the network to learn complex representations of images without a human label. In particular, spatial/position pretext tasks are important as the image composition and the relationship of objects in an image can be a powerful source of information. PART (\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations) is one such pretraining method that leverages relative transformations between two image patches. That method predicts relative translation only ($\Delta x,\Delta y$) with rotation left as future work - which is what this project sets out to add.
+There are many different types of pretext tasks - some remove parts of an image, some rotate the image, some remove colour - but the goal is the same: to force the network to learn complex representations of images without a human label. In particular, spatial/position pretext tasks are important as the image composition and the relationship of objects in an image can be a powerful source of information. PART (\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations)~\cite{part} is one such pretraining method that leverages relative transformations between two image patches. That method predicts relative translation only ($\Delta x,\Delta y$) with rotation left as future work - which is what this project sets out to add.
 
 \section{Problem and context}
-Most spatially-aware tasks involve a grid structure. To give some examples, Masked AutoEncoder (MAE) slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. DropPos masks some patches on a grid then drops information about absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Doersch et al.'s context prediction tasks the model with predicting the relative position of patches while still being confined to a grid. 
+Most spatially-aware tasks involve a grid structure. To give some examples, Masked AutoEncoder (MAE)~\cite{mae} slices an image into a grid of patches and then masks some of them. The pretext task is to then reconstruct the missing patches. DropPos~\cite{droppos} masks some patches on a grid then drops information about absolute patch positions and tasks the network with recovering the missing positions. The pretext task in Doersch et al.'s~\cite{context2015} context prediction tasks the model with predicting the relative position of patches while still being confined to a grid.
 
-The novel contribution of PART is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Geometrically, predicting only $(\Delta x, \Delta y)$ means PART's target space is the translation subgroup of the plane. The natural unfinished step is to predict the full group of planar rigid motions, $\mathrm{SE}(2)$, by adding a relative orientation target $\Delta\varphi$ to each patch pair. The authors themselves flag this as open: they observe that seeing a lip implies a nose above it, but a \emph{rotated} lip implies a \emph{rotated} nose, and leave modelling rotations to future work (their Section~7). This matters because grid-based pretext tasks cannot express continuous geometry of this kind, yet the dominant orientation of a part relative to its neighbours is often the discriminative signal - particularly for orientation-sensitive tasks such as pose estimation or oriented object detection. To the best of current knowledge, no prior work extends a relative off-grid patch-pair pretext task to relative orientation.
+The novel contribution of PART~\cite{part} is to sample the patches untethered to a grid and to then predict the translation between two off-grid patches. Geometrically, predicting only $(\Delta x, \Delta y)$ means PART's target space is the translation subgroup of the plane. The natural unfinished step is to predict the full group of planar rigid motions, $\mathrm{SE}(2)$, by adding a relative orientation target $\Delta\varphi$ to each patch pair. The authors themselves flag this as open: they observe that seeing a lip implies a nose above it, but a \emph{rotated} lip implies a \emph{rotated} nose, and leave modelling rotations to future work (their Section~7). This matters because grid-based pretext tasks cannot express continuous geometry of this kind, yet the dominant orientation of a part relative to its neighbours is often the discriminative signal - particularly for orientation-sensitive tasks such as pose estimation or oriented object detection. To the best of current knowledge, no prior work extends a relative off-grid patch-pair pretext task to relative orientation.
 
 \section{Aims and objectives}
 The research question can be summarised as follows: does adding a relative orientation target ($\Delta \varphi$) to each patch pair yield representations that perform better on orientation-sensitive downstream tasks without degrading classification? To answer it, the following objectives will be pursued:
@@ -173,7 +173,7 @@ In the transformer era, computer vision also took inspiration from NLP, this tim
 Crucially, all methods mentioned above are confined to a fixed grid and predict positions or reconstruct masked content on that fixed grid.
 
 \section{PART: relative composition of off-grid patches}
-\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations is a pretraining method that is not based on a grid (Figure~\ref{fig:part}). Given that this paper is the base of this project, a more detailed treatment is required.
+\textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations~\cite{part} is a pretraining method that is not based on a grid (Figure~\ref{fig:part}). Given that this paper is the base of this project, a more detailed treatment is required.
 
 \begin{figure}[t]
   \centering
@@ -227,7 +227,7 @@ To represent rotation, a simple direct angle regression may be used. This is a p
 
 
 \section{Multi-objective learning and loss balancing}
-Predicting several relative quantities from a shared backbone is a multi-task regression. This means that channels with different units and convergence rate may interfere and a single fixed loss weighting may prove hard to tune and may not be optimal throughout training. Indeed, in PART\cite{part} itself adding the relative scale and aspect ratio terms delayed the convergence of translation terms relative to the baseline. One established solution is to make the weighting adaptive. Kendall et al.~\cite{kendall} propose weighting each task by a learned homoscedastic uncertainty which automatically downweights noisier tasks.
+Predicting several relative quantities from a shared backbone is a multi-task regression. This means that channels with different units and convergence rate may interfere and a single fixed loss weighting may prove hard to tune and may not be optimal throughout training. Indeed, in PART~\cite{part} itself adding the relative scale and aspect ratio terms delayed the convergence of translation terms relative to the baseline. One established solution is to make the weighting adaptive. Kendall et al.~\cite{kendall} propose weighting each task by a learned homoscedastic uncertainty which automatically downweights noisier tasks.
 
 \section{Orientation-sensitive downstream tasks}
 The value of orientation-aware representations is clearest in domains without a canonical "up". Aerial imagery is the standard case: viewed from above, objects appear at arbitrary in-plane orientations and are often densely packed with large aspect ratios, so axis-aligned boxes localise them poorly. This motivates oriented object detection, where targets are rotated bounding boxes carrying an explicit angle. DOTA~\cite{dota} is a large-scale benchmark for this task in aerial imagery and HRSC2016~\cite{hrsc2016} a focused high-resolution dataset for oriented ship detection - both annotate and evaluate orientation directly. A representative state-of-the-art detector is Oriented R-CNN~\cite{orcnn}, which adds an oriented region proposal network that produces rotated proposals almost cost-free, reaching $75.87\%$ mAP on DOTA and $96.50\%$ mAP on HRSC2016 at $15.1$~FPS. Such results show orientation is routinely learned as a regression target on well-characterised benchmarks - the setting in which an orientation-aware pretrained backbone could be assessed, and what motivates the downstream evaluation here.
@@ -238,7 +238,7 @@ The value of orientation-aware representations is clearest in domains without a 
 \chapter{Preliminary Work and Feasibility}
 
 \section{Reproducing the PART pipeline on a modern stack}
-A short feasibility test was run on a local device (2021 M1 Pro MacBook Pro). Tech stack of torch, torchvision, and timm (PyTorch Image Models) had to be bumped up by several versions as the wheels used by the PART paper do not exist for modern Python. Some minor bugfixes in the original codebase were applied as bumping up the Python version from $\leq 3.11$ to $3.12$ introduced stricter f-string parsing. Running on MPS backend, the loss was finite and monotonically decreasing. As mentioned in the original paper, scale channels ($\Delta w, \Delta h$) dropped steeply while translation channels ($\Delta x, \Delta y$) barely moved in the first couple of hundred of iterations. Based on these results, Apple-Silicon MPS will be used for local development and testing while for the full pretraining and downstream training the DoC GPU cluster will be used via Slurm.
+A short feasibility test was run on a local device (2021 M1 Pro MacBook Pro). Tech stack of torch, torchvision, and timm (PyTorch Image Models) had to be bumped up by several versions as the wheels used by the PART paper~\cite{part} do not exist for modern Python. Some minor bugfixes in the original codebase were applied as bumping up the Python version from $\leq 3.11$ to $3.12$ introduced stricter f-string parsing. Running on MPS backend, the loss was finite and monotonically decreasing. As mentioned in the original paper, scale channels ($\Delta w, \Delta h$) dropped steeply while translation channels ($\Delta x, \Delta y$) barely moved in the first couple of hundred of iterations. Based on these results, Apple-Silicon MPS will be used for local development and testing while for the full pretraining and downstream training the DoC GPU cluster will be used via Slurm.
 
 
 % =====================================================================
@@ -246,66 +246,108 @@ A short feasibility test was run on a local device (2021 M1 Pro MacBook Pro). Te
 % =====================================================================
 \chapter{Project Plan}
 
-\guide{The forward-looking chapter. Make the plan concrete and measurable, and tie
-it back to the objectives in Chapter~1. A reader should finish this chapter knowing
-exactly what you will build, how you will know it worked, and what could go wrong.}
-
 \section{Approach and phases}
-\guide{Lay out the phased plan (reuse the proposal's four-phase structure):
-Phase~0 baseline reproduction + translation-only control; Phase~1 the
-rotation-aware objective $(\Delta x,\Delta y,\Delta\varphi)$ with the interpolation
-control; Phase~2 ablations (angle representation, frame convention, loss weighting,
-and --- last --- whether scale helps); Phase~3 downstream evaluation; Phase~4
-synthesis and writing. Emphasise that every addition is flag-gated so the baseline
-path is unchanged, which keeps any downstream effect cleanly attributable.}
+The work is organised into five phases, building the geometry one channel-group at a
+time, simplest first, so that any downstream effect is cleanly attributable to the
+orientation channel. A guiding principle throughout is that every rotation-related
+addition is gated behind a \texttt{-{}-rotation} flag, so that with the flag off the
+translation-only baseline path is byte-for-byte unchanged and remains a clean
+control.
+
+\begin{enumerate}
+  \item \textbf{Phase 0 - Setup and baseline.} Set up the repository on a modern
+  stack, reproduce the PART CIFAR-100 / ViT-S baseline, then strip it to the
+  translation-only $(\Delta x, \Delta y)$ control by disabling the scale channels.
+
+  \item \textbf{Phase 1 - RoPART: the rotation-aware pretext.} Add relative
+  orientation as a $(\cos\Delta\varphi, \sin\Delta\varphi)$ target on top of the
+  baseline (raising the relative head from 2 to 4 channels), with an angle-aware
+  loss, continuous $\varphi$, and the interpolation control. 
+
+  \item \textbf{Phase 2 - Does $\Delta\varphi$ learn?}
+  Full-scale pretraining on the DoC GPU cluster, characterising the orientation
+  channel with intrinsic metrics under the confound controls, alongside the
+  following ablations:
+  \begin{itemize}
+    \item angle representation (e.g.\ $(\cos,\sin)$ MSE vs.\ cosine loss);
+    \item frame convention (global vs.\ reference-local rotated frame);
+    \item loss weighting ($w_\varphi$, fixed vs.\ uncertainty-weighted);
+    \item whether adding scale $(\Delta w, \Delta h)$ helps --- evaluated last, and
+    folded in only if it does.
+  \end{itemize}
+
+  \item \textbf{Phase 3 - Downstream evaluation.} Evaluate the pretrained backbone
+  against the translation-only baseline on a classification no-degradation check, a
+  synthetic orientation probe, and one real orientation-sensitive task.
+
+  \item \textbf{Phase 4 - Synthesis and writing.} Unified comparison, a
+  reproducible artefact (code, seeds, checkpoints, configs), and writing up.
+\end{enumerate}
 
 \section{Timeline}
-\guide{Give a week-by-week or phase-by-phase timeline to the deadlines (poster
-2026-09-03, final report 2026-09-10). A simple table is fine; consider
-\texttt{pgfgantt} for a chart. Fill in the milestone rows below.}
+The phases above map onto the calendar as shown in Table~\ref{tab:timeline}, working
+back from the final report deadline of 9 September 2026.
 
 \begin{table}[h]
   \centering
   \begin{tabular}{@{}lll@{}}
     \toprule
-    Phase & Weeks & Milestone / deliverable \\
+    Phase & Dates & Milestone / deliverable \\
     \midrule
-    Phase 0 & \textit{[Wk]} & \textit{[baseline reproduced; translation-only control]} \\
-    Phase 1 & \textit{[Wk]} & \textit{[rotation pretext training at scale]} \\
-    Phase 2 & \textit{[Wk]} & \textit{[ablations + intrinsic metrics]} \\
-    Phase 3 & \textit{[Wk]} & \textit{[downstream evaluation]} \\
-    Phase 4 & \textit{[Wk]} & \textit{[synthesis, poster, report]} \\
+    Phase 0 & 06 Jun -- 21 Jun & Baseline reproduced; translation-only control \\
+    Phase 1 & 22 Jun -- 12 Jul & Rotation pretext $(\Delta x,\Delta y,\Delta\varphi)$ training at scale \\
+    Phase 2 & 13 Jul -- 02 Aug & Ablations + intrinsic metrics under confound controls \\
+    Phase 3 & 03 Aug -- 23 Aug & Downstream evaluation vs.\ baseline \\
+    Phase 4 & 24 Aug -- 9 Sep & Synthesis; presentation; report \\
     \bottomrule
   \end{tabular}
-  \caption{Project timeline (to be completed).}
+  \caption{Project timeline. The hard deadline is the final report on 9 September 2026.}
+  \label{tab:timeline}
 \end{table}
 
 \section{Evaluation and success criteria}
-\guide{Define what success looks like --- this is explicitly asked for. Separate
-\emph{intrinsic} metrics (angular error on $\Delta\varphi$; rotational negative
-symmetry $\Delta\varphi(i\!\to\!j)=-\Delta\varphi(j\!\to\!i)$; compositional
-consistency) from \emph{downstream} outcomes (a classification no-degradation check
-vs.\ the translation-only baseline; a synthetic orientation probe; one real
-orientation-sensitive task). State the comparison baseline and what counts as a
-positive result.}
+Success is judged against the translation-only $(\Delta x, \Delta y)$ baseline, the
+control that every comparison is measured against. The evaluation separates
+\emph{intrinsic} questions - does the orientation channel learn the geometry it
+should? - from \emph{downstream} questions - do the resulting representations
+transfer?
 
-\section{Risks and mitigations}
-\guide{Address the validity threats head-on --- markers reward this. The big one is
-the \emph{interpolation confound}: rotating and resampling a small patch leaves a
-blur signature correlated with $\varphi$, so any positive $\Delta\varphi$ result
-needs a matched-interpolation control before it can be claimed as genuine learning.
-Also cover orientation recoverability/well-posedness (the signal is sparser than
-translation and content-dependent --- potentially turned into an orientation-
-uncertainty contribution) and the compute ceiling (full ImageNet-1K ViT-B
-pretraining is out of scope; CIFAR-100 / ViT-S is the workhorse).}
+\paragraph{Intrinsic metrics.} These characterise the orientation channel directly,
+computed on the unit circle to respect the $\pm\pi$ wrap-around:
+\begin{itemize}
+  \item \emph{Angular error} on $\Delta\varphi$, recovered from the predicted
+  $(\cos,\sin)$ outputs and wrapped into $(-\pi,\pi]$. The reference null is the
+  mean-predictor floor: for approximately uniform $\Delta\varphi$, predicting
+  $(0,0)$ gives a $(\cos,\sin)$ MSE of exactly $1.0$, so beating this floor by a
+  clear margin is the minimal evidence that anything is being learned.
+  \item \emph{Rotational negative symmetry}: predictions should satisfy
+  $\Delta\varphi(i\!\to\!j) = -\Delta\varphi(j\!\to\!i)$, the rotational analogue of
+  the translational symmetry already confirmed in Phase~0.
+  \item \emph{Compositional consistency}: relative orientations should compose
+  consistently around triples of patches.
+\end{itemize}
+A positive intrinsic result is angular error well below the mean-predictor floor with
+the symmetry and consistency invariants holding --- \emph{and}, critically, surviving
+a matched-interpolation control (the same resampling applied to $\varphi = 0$
+patches) rather than reflecting a resampling artefact.
+
+\paragraph{Downstream outcomes.} Three evaluations, each against the
+translation-only baseline:
+\begin{itemize}
+  \item a \emph{classification no-degradation check} on CIFAR-100 --- the orientation
+  channel must not cost classification accuracy relative to the baseline;
+  \item a \emph{synthetic orientation probe} that isolates the mechanism by testing
+  whether orientation information is recoverable from the frozen representation;
+  \item \emph{one real orientation-sensitive task} (oriented detection on aerial
+  imagery), where an orientation-aware backbone is expected to help.
+\end{itemize}
+The headline positive result is an improvement on the orientation-sensitive task
+\emph{without} degrading classification.
 
 \section{Ethical considerations}
-\guide{Brief but required if relevant. This project uses standard public vision
-benchmarks (CIFAR-100, optionally ImageNet-100, and an aerial-imagery set for the
-downstream task) and no human-subjects or personal data, so Imperial ethical
-approval is most likely \emph{not} required --- state this explicitly and note any
-caveats (e.g.\ licensing/usage terms of the aerial dataset). Confirm against your
-ethics review checklist.}
+This project uses only standard public vision benchmarks with no human-subjects or
+personal data, so Imperial ethical approval is not required; all code and datasets
+will be used in accordance with their respective licences.
 
 % =====================================================================
 %  REFERENCES — Vancouver (numbered, in order of appearance)
