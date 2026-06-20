@@ -237,24 +237,9 @@ The value of orientation-aware representations is clearest in domains without a 
 % =====================================================================
 \chapter{Preliminary Work and Feasibility}
 
-\guide{The spec notes MSc Computing students are unlikely to have substantial
-experimental results yet, so keep this chapter short and honest --- it is about
-\emph{feasibility}, not findings. Report only what is genuinely done. Do not
-over-claim.}
-
 \section{Reproducing the PART pipeline on a modern stack}
-\guide{Describe getting the upstream PART implementation running on the current
-stack (Python~3.12, torch~2.x) and the device strategy (Apple-Silicon MPS for
-local development, CUDA/SLURM for full pretraining). Mention the baseline smoke run
-on CIFAR-100 with ViT-S as a feasibility check. Keep specifics light at interim
-stage; the detailed engineering belongs in the final report.}
+A short feasibility test was run on a local device (2021 M1 Pro MacBook Pro). Tech stack of torch, torchvision, and timm (PyTorch Image Models) had to be bumped up by several versions as the wheels used by the PART paper do not exist for modern Python. Some minor bugfixes in the original codebase were applied as bumping up the Python version from $\leq 3.11$ to $3.12$ introduced stricter f-string parsing. Running on MPS backend, the loss was finite and monotonically decreasing. As mentioned in the original paper, scale channels ($\Delta w, \Delta h$) dropped steeply while translation channels ($\Delta x, \Delta y$) barely moved in the first couple of hundred of iterations. Based on these results, Apple-Silicon MPS will be used for local development and testing while for the full pretraining and downstream training the DoC GPU cluster will be used via Slurm.
 
-\section{Towards a translation-only baseline}
-\guide{State the build-order principle: add geometry one channel-group at a time,
-starting from a clean translation-only $(\Delta x,\Delta y)$ baseline (scale
-disabled) as the control everything is measured against, with translational
-negative symmetry as a correctness gate before any rotation work. Note this is
-planned/in-progress rather than completed if that is the case.}
 
 % =====================================================================
 %  CHAPTER 4 — PROJECT PLAN
