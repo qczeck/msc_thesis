@@ -1,0 +1,16 @@
+# RoPART environment — modern stack (Python 3.12).
+# Deliberately NOT matching the upstream PART pins (torch==1.7.0 etc.), which have
+# no wheels for modern Python.
+#
+# This is the minimal set for the early visualisation/sampling work. It will grow
+# as we port more of the pretraining pipeline (timm, wandb, etc.).
+
+torch>=2.2
+torchvision>=0.17
+numpy>=1.26
+pillow>=10.2
+matplotlib>=3.8
+
+# Notebook tooling for the visual demos.
+jupyter>=1.0
+ipykernel>=6.29
