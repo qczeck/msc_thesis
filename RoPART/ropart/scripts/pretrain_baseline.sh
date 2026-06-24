@@ -7,6 +7,8 @@
 #   tmux new -s ropart 'ropart/scripts/pretrain_baseline.sh'
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # -> RoPART/
+# shellcheck disable=SC1091
+source ropart/scripts/_doc_env.sh   # load CUDA on DoC; no-op off /vol/cuda
 .venv/bin/python -m ropart.train \
   --control translation \
   --model deit_small_patch4_32 --data-path ./data \
