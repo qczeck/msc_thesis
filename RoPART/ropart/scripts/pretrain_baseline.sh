@@ -13,7 +13,7 @@ source ropart/scripts/_doc_env.sh   # load CUDA on DoC; no-op off /vol/cuda
   --control translation \
   --query-type patch_cat \
   --model deit_small_patch4_32 --data-path ./data \
-  --epochs 100 --batch-size 128 --lr 5e-4 --warmup-epochs 5 \
+  --epochs 100 --batch-size 128 --lr 5e-4 --warmup-epochs 5 --eval-every 5 \
   --output_dir ./out/baseline_translation \
   --wandb-name ropart-baseline-translation \
   "$@"

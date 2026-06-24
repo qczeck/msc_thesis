@@ -243,18 +243,25 @@ def run_pretrain(args, device):
             patch_size=patch_size, rotates=rotates, optimizer=optimizer, scaler=scaler,
             max_norm=args.clip_grad, max_steps=args.max_steps,
         )
-        val_stats = pretrain_run_epoch(
-            model, val_loader, device, criterion,
-            patch_size=patch_size, rotates=rotates, max_steps=args.max_steps,
+        # Validation is a full 10k-image sweep; running it every epoch is the main
+        # source of the epoch-boundary GPU-utilisation dip. Gate it behind
+        # --eval-every (always evaluate the final epoch).
+        do_eval = (epoch % args.eval_every == 0) or (epoch == args.epochs - 1)
+        val_stats = (
+            pretrain_run_epoch(model, val_loader, device, criterion,
+                               patch_size=patch_size, rotates=rotates, max_steps=args.max_steps)
+            if do_eval else None
         )
         dt = time.time() - t0
         log = {"epoch": epoch, "lr": lr, "epoch_time_s": dt,
-               **{f"train/{k}": v for k, v in train_stats.items()},
-               **{f"val/{k}": v for k, v in val_stats.items()}}
+               **{f"train/{k}": v for k, v in train_stats.items()}}
+        if val_stats is not None:
+            log.update({f"val/{k}": v for k, v in val_stats.items()})
         wb.log(log, step=epoch)
         print(f"[{epoch}] lr={lr:.2e} train_loss={train_stats['loss']:.4f} "
-              f"val_loss={val_stats['loss']:.4f} "
-              + (f"val_ang_err={val_stats.get('ang_err_deg', float('nan')):.1f}° " if rotates else "")
+              + (f"val_loss={val_stats['loss']:.4f} "
+                 + (f"val_ang_err={val_stats.get('ang_err_deg', float('nan')):.1f}° " if rotates else "")
+                 if val_stats is not None else "")
               + f"({dt:.0f}s)")
         save_checkpoint(out_dir / "checkpoint.pth", model, optimizer, epoch, args,
                         extra={"wandb_id": args.wandb_id})
@@ -393,6 +400,8 @@ def get_args():
     p.add_argument("--epochs", default=100, type=int)
     p.add_argument("--batch-size", default=128, type=int)
     p.add_argument("--max-steps", default=None, type=int, help="cap steps/epoch (smoke/diagnostics)")
+    p.add_argument("--eval-every", default=1, type=int,
+                   help="run validation every N epochs (and the last); higher = less epoch-boundary GPU idle")
     # optim / schedule
     p.add_argument("--lr", default=5e-4, type=float)
     p.add_argument("--warmup-lr", default=1e-6, type=float)
