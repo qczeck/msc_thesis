@@ -67,6 +67,22 @@ def lr_at(epoch: int, args) -> float:
     return args.min_lr + (args.lr - args.min_lr) * 0.5 * (1 + math.cos(math.pi * progress))
 
 
+def loader_kwargs(args, device) -> dict:
+    """DataLoader options shared by every loader.
+
+    ``persistent_workers`` keeps worker processes alive across epochs (otherwise
+    they are torn down and respawned each epoch — the GPU-utilisation sawtooth that
+    drops to 0 at every epoch boundary); ``prefetch_factor`` deepens the per-worker
+    queue so the GPU is not starved while batches are sampled (off-grid sampling and
+    rotated cropping are CPU-bound). Both require ``num_workers > 0``.
+    """
+    kw: dict = {"num_workers": args.num_workers, "pin_memory": device.type == "cuda"}
+    if args.num_workers > 0:
+        kw["persistent_workers"] = True
+        kw["prefetch_factor"] = 4
+    return kw
+
+
 def param_groups(model, weight_decay):
     no_wd = model.no_weight_decay() if hasattr(model, "no_weight_decay") else set()
     decay, no_decay = [], []
@@ -167,12 +183,12 @@ def run_pretrain(args, device):
     val_ds = RoPARTCIFAR(args.data_path, extractor=extractor, rotates=rotates,
                          img_size=img_size, patch_size=patch_size, train=False)
     train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"), drop_last=True,
+        train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True,
+        **loader_kwargs(args, device),
     )
     val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"),
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        **loader_kwargs(args, device),
     )
 
     model = RoPARTViT(
@@ -313,11 +329,11 @@ def run_linear_probe(args, device):
 
     train_ds, val_ds = build_cls_dataset(args.data_path, img_size=img_size)
     train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"), drop_last=True)
+        train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True,
+        **loader_kwargs(args, device))
     val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda"))
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        **loader_kwargs(args, device))
 
     optimizer = torch.optim.AdamW(model.clf.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
