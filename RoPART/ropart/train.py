@@ -103,6 +103,21 @@ def _slug(s: str) -> str:
     return re.sub(r"[^0-9a-zA-Z._-]+", "-", s).strip("-")
 
 
+def resolve_run_id(args, resumed_id: str | None) -> str:
+    """Pick the wandb run id (also used as the display name).
+
+    Priority: an explicit ``--wandb-id`` wins; otherwise a ``resumed_id`` recovered
+    from a checkpoint continues logging on the *same* run; otherwise a fresh
+    timestamped id (``<name>-YYYYmmdd-HHMMSS``) so each launch is its own run and
+    sorts chronologically in the dashboard (no more id collisions on relaunch).
+    """
+    if args.wandb_id:
+        return args.wandb_id
+    if resumed_id:
+        return resumed_id
+    return f"{_slug(args.wandb_name)}-{time.strftime('%Y%m%d-%H%M%S')}"
+
+
 class WandbRun:
     """Thin wandb wrapper: chosen mode, resumable id, graceful offline fallback."""
 
@@ -113,11 +128,11 @@ class WandbRun:
             return
         import wandb
 
-        run_id = args.wandb_id or _slug(args.wandb_name)
+        run_id = resolve_run_id(args, None)
         common = dict(
             project=args.wandb_project,
             entity=args.wandb_entity or None,
-            name=args.wandb_name,
+            name=run_id,
             id=run_id,
             resume="allow",
             config=config,
@@ -203,13 +218,18 @@ def run_pretrain(args, device):
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
 
     start_epoch = 0
+    resumed_id = None
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu")
         model.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch = ckpt["epoch"] + 1
+        resumed_id = ckpt.get("wandb_id")
         print(f"resumed from {args.resume} at epoch {start_epoch}")
 
+    # pin the run id once: fresh timestamped id for new runs, recovered id on resume,
+    # so checkpoints carry it and a resume continues the same wandb run.
+    args.wandb_id = resolve_run_id(args, resumed_id)
     wb = WandbRun(args, vars(args))
     out_dir = Path(args.output_dir)
 
@@ -237,7 +257,7 @@ def run_pretrain(args, device):
               + (f"val_ang_err={val_stats.get('ang_err_deg', float('nan')):.1f}° " if rotates else "")
               + f"({dt:.0f}s)")
         save_checkpoint(out_dir / "checkpoint.pth", model, optimizer, epoch, args,
-                        extra={"wandb_id": args.wandb_id or _slug(args.wandb_name)})
+                        extra={"wandb_id": args.wandb_id})
 
     wb.finish()
 
