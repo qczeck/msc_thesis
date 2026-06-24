@@ -29,6 +29,7 @@ from ropart.data import RoPARTCIFAR, build_cls_dataset
 from ropart.engine import cls_run_epoch, pretrain_run_epoch
 from ropart.losses import RelativeMSE
 from ropart.model import RoPARTViT
+from ropart.targets import build_targets, gather_pairs
 
 
 # --------------------------------------------------------------------------- #
@@ -177,7 +178,7 @@ def run_pretrain(args, device):
     model = RoPARTViT(
         img_size=img_size, patch_size=patch_size, num_classes=100,
         num_channels=num_channels, num_pairs=args.num_pairs, mask_prob=args.mask_prob,
-        drop_path_rate=args.drop_path,
+        drop_path_rate=args.drop_path, cross_attention_query_type=args.query_type,
     ).to(device)
     print(f"params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
@@ -223,6 +224,62 @@ def run_pretrain(args, device):
                         extra={"wandb_id": args.wandb_id or _slug(args.wandb_name)})
 
     wb.finish()
+
+
+# --------------------------------------------------------------------------- #
+# Single-batch overfit diagnostic
+# --------------------------------------------------------------------------- #
+
+
+def run_overfit(args, device):
+    """Fit one fixed batch for ``--overfit-steps`` steps; loss should fall well
+    below the mean-predictor floor if the pretext path is correctly wired.
+
+    This is the decisive wiring-vs-task test: the dataset resamples patches every
+    ``__getitem__``, so we pull a single batch *once* and loop the optimiser on it
+    (fp32, no AMP, no LR schedule — to remove those as variables). If loss stays
+    pinned at the floor here, the bug is in the model/loss/gradient path, not the
+    data scale or the schedule.
+    """
+    img_size, patch_size = parse_model_name(args.model)
+    control = args.control or ("raw" if args.rotation else "translation")
+    extractor, num_channels, rotates = build_extractor(control)
+    print(f"[overfit] control={control} num_channels={num_channels} rotates={rotates}")
+
+    ds = RoPARTCIFAR(args.data_path, extractor=extractor, rotates=rotates,
+                     img_size=img_size, patch_size=patch_size, train=True)
+    loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True,
+                                         num_workers=0, drop_last=True)
+    packed, boxes, angles = next(iter(loader))
+    packed = packed.to(device)
+    boxes = boxes.to(device)
+    angles = angles.to(device)
+
+    model = RoPARTViT(img_size=img_size, patch_size=patch_size, num_classes=100,
+                      num_channels=num_channels, num_pairs=args.num_pairs,
+                      mask_prob=args.mask_prob,
+                      cross_attention_query_type=args.query_type).to(device)
+    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi)
+    optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr)
+
+    targets_full = build_targets(boxes, angles if rotates else None, rotates=rotates,
+                                 centered=True, normalize_by=patch_size)
+    floor = (targets_full[:, 0].var(unbiased=False) + targets_full[:, 1].var(unbiased=False)).item()
+    print(f"[overfit] xy floor (target to beat) ~ {floor:.3f}")
+
+    model.train()
+    for step in range(args.overfit_steps):
+        outputs, indices = model.forward_pretrain(packed)
+        targets = gather_pairs(targets_full, indices)
+        loss = criterion(outputs, targets)
+        optimizer.zero_grad()
+        loss.backward()
+        gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1e9)
+        optimizer.step()
+        if step % 50 == 0 or step == args.overfit_steps - 1:
+            print(f"[overfit {step:4d}] loss={loss.item():.4f} grad_norm={float(gnorm):.3f}")
+    print("[overfit] done. loss << floor => wiring sound (cause is scale/schedule); "
+          "loss ~ floor => wiring/gradient bug.")
 
 
 # --------------------------------------------------------------------------- #
@@ -313,6 +370,9 @@ def get_args():
                    help="patch-extraction control; default translation (or raw if --rotation)")
     p.add_argument("--rotation", action="store_true", help="shorthand: use control 'raw' if --control unset")
     p.add_argument("--num_pairs", default=64, type=int)
+    p.add_argument("--query-type", default="patch_cat", choices=["positional", "patch_cat"],
+                   help="relative-head query: the two patch features (patch_cat, default — learns) "
+                        "or a fixed pair code (positional, upstream default — does not learn on this config)")
     p.add_argument("--mask-prob", default=0.0, type=float)
     p.add_argument("--w-xy", default=1.0, type=float)
     p.add_argument("--w-phi", default=1.0, type=float)
@@ -322,6 +382,8 @@ def get_args():
     p.add_argument("--sigma-max", default=0.8, type=float)
     # mode
     p.add_argument("--linear-probe", action="store_true")
+    p.add_argument("--overfit-steps", default=0, type=int,
+                   help="diagnostic: fit one fixed batch for N steps (0=off)")
     p.add_argument("--resume", default="")
     # wandb
     p.add_argument("--wandb-mode", default="online", choices=["online", "offline", "disabled"])
@@ -337,7 +399,9 @@ def main():
     set_seed(args.seed)
     device = pick_device(args.device)
     print(f"device: {device}")
-    if args.linear_probe:
+    if args.overfit_steps > 0:
+        run_overfit(args, device)
+    elif args.linear_probe:
         run_linear_probe(args, device)
     else:
         run_pretrain(args, device)

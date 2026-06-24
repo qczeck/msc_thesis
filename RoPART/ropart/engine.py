@@ -78,23 +78,24 @@ def pretrain_run_epoch(
                 targets = gather_pairs(targets, indices)
                 loss = criterion(outputs, targets)
 
+            grad_norm = None
             if train:
                 optimizer.zero_grad()
                 if scaler is not None:
                     scaler.scale(loss).backward()
-                    if max_norm:
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    scaler.unscale_(optimizer)  # unscale so the measured/clipped norm is real
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm or 1e9)
                     scaler.step(optimizer)
                     scaler.update()
                 else:
                     loss.backward()
-                    if max_norm:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm or 1e9)
                     optimizer.step()
 
             meters.update(bs, **_pretrain_metrics(outputs.detach(), targets.detach(), rotates))
             meters.update(bs, loss=loss.item())
+            if grad_norm is not None:
+                meters.update(bs, grad_norm=float(grad_norm))
 
     return meters.summary()
 
