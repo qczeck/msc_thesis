@@ -12,7 +12,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Polygon, Rectangle
 
 
 def _to_hwc(image: np.ndarray | torch.Tensor) -> np.ndarray:
@@ -205,5 +205,164 @@ def show_sampling_overview(image, boxes, patches, retiled, figsize=(15, 5)):
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=figsize)
     draw_boxes(image, boxes, ax=ax0, title=f"{boxes.shape[1]} off-grid boxes on source")
     show_image(retiled, ax=ax1, title="row-major packed pseudo-image (ViT input)")
+    fig.tight_layout()
+    return fig
+
+
+# --------------------------------------------------------------------------- #
+# Rotation (RoPART extension)
+# --------------------------------------------------------------------------- #
+
+
+def draw_rotated_boxes(
+    image,
+    boxes: torch.Tensor,
+    angles: torch.Tensor,
+    ax=None,
+    title: str | None = None,
+    figsize=(6, 6),
+    number: bool = True,
+    linewidth: float = 1.5,
+    orientation_tick: bool = True,
+    colors=None,
+):
+    """Overlay rotated patch footprints (and orientation ticks) on the source image.
+
+    Each footprint is the ``patch_size`` square rotated by its angle about the
+    patch centre — the exact region :func:`helpers.sampling.crop_patches_rotated`
+    reads. The tick points along the patch's local +x axis, so the orientation is
+    unambiguous even for near-symmetric content.
+
+    Args:
+        image: source image (uint8 ``HWC``).
+        boxes: ``(4, N)`` box tensor.
+        angles: ``(N,)`` orientations in radians.
+        ax, title, figsize, number, linewidth: as in :func:`draw_boxes`.
+        orientation_tick: draw a centre→local-+x tick showing the orientation.
+        colors: optional list of per-box colours (else an HSV sweep by index).
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    show_image(image, ax=ax, title=title)
+
+    boxes_t = boxes.T.tolist()
+    angles_l = angles.tolist()
+    cmap = plt.colormaps["hsv"]
+    n = len(boxes_t)
+    for i, ((x_s, y_s, x_e, y_e), phi) in enumerate(zip(boxes_t, angles_l)):
+        color = colors[i] if colors is not None else cmap(i / max(n, 1))
+        cx, cy, h = (x_s + x_e) / 2.0, (y_s + y_e) / 2.0, (x_e - x_s) / 2.0
+        cos, sin = math.cos(phi), math.sin(phi)
+
+        def rot(lx, ly):  # source point for patch-local (lx, ly), R(phi) about centre
+            return (cx + cos * lx - sin * ly, cy + sin * lx + cos * ly)
+
+        corners = [rot(-h, -h), rot(h, -h), rot(h, h), rot(-h, h)]
+        ax.add_patch(Polygon(corners, closed=True, fill=False, edgecolor=color, linewidth=linewidth))
+        if orientation_tick:
+            tx, ty = rot(h, 0.0)  # patch's local +x ("right") direction
+            ax.plot([cx, tx], [cy, ty], color=color, linewidth=linewidth)
+        if number:
+            ax.text(cx, cy, str(i), color=color, fontsize=7, ha="center", va="center")
+    return ax
+
+
+def show_rotation_sweep(
+    image,
+    box: torch.Tensor,
+    angles: torch.Tensor,
+    *,
+    fill_corners: bool = True,
+    interpolation: str = "bilinear",
+    ncols: int | None = None,
+    title: str | None = None,
+    cell_size: float = 1.6,
+):
+    """Crop **one** box at a sweep of angles and show the resulting patches.
+
+    The interpolation-confound view (Validity threat #1): axis-aligned angles
+    (0°, 90°, …) resample almost exactly onto the grid and stay sharp, while
+    oblique angles (≈45°) blur — a cue a model could read instead of learning
+    orientation. Compare ``fill_corners`` True/False to see the empty-corner
+    artefact, or ``interpolation`` "bilinear"/"nearest" to see blur vs aliasing.
+
+    Args:
+        image: source image (uint8 ``HWC``).
+        box: a single ``(4,)`` box tensor.
+        angles: ``(K,)`` orientations in radians to sweep.
+        fill_corners, interpolation: forwarded to
+            :func:`helpers.sampling.crop_patches_rotated`.
+        ncols, title, cell_size: layout options.
+    """
+    from helpers.sampling import crop_patches_rotated
+
+    boxes = box.reshape(4, 1).repeat(1, len(angles))
+    patches = crop_patches_rotated(
+        image, boxes, angles, fill_corners=fill_corners, interpolation=interpolation
+    )
+    k = len(angles)
+    if ncols is None:
+        ncols = k
+    nrows = int(math.ceil(k / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * cell_size, nrows * cell_size))
+    axes = np.atleast_1d(axes).ravel()
+    for idx, ax in enumerate(axes):
+        ax.set_axis_off()
+        if idx < k:
+            ax.imshow(_to_hwc(patches[idx]))
+            ax.set_title(f"{math.degrees(float(angles[idx])):.0f}°", fontsize=8)
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
+def show_orientation_pair(
+    image,
+    boxes: torch.Tensor,
+    angles: torch.Tensor,
+    i: int,
+    j: int,
+    *,
+    fill_corners: bool = True,
+    figsize=(13, 4.5),
+):
+    """Visualise one ordered patch pair and its relative orientation ``Δφ``.
+
+    Three panels: the rotated footprints of reference ``i`` (blue) and target
+    ``j`` (red) on the source image, then the two rotated patches annotated with
+    their orientations. The title reports ``Δφ = φ_j − φ_i`` and its
+    ``(cos, sin)`` encoding (the RoPART target).
+    """
+    from helpers.sampling import crop_patches_rotated
+
+    pair = crop_patches_rotated(
+        image, boxes[:, [i, j]], angles[[i, j]], fill_corners=fill_corners
+    )
+    phi_i, phi_j = float(angles[i]), float(angles[j])
+    dphi = phi_j - phi_i
+    dphi_wrapped = (dphi + math.pi) % (2 * math.pi) - math.pi  # to (-π, π] for display
+
+    fig, (a0, a1, a2) = plt.subplots(1, 3, figsize=figsize)
+    draw_rotated_boxes(
+        image,
+        boxes[:, [i, j]],
+        angles[[i, j]],
+        ax=a0,
+        number=False,
+        colors=["tab:blue", "tab:red"],
+        title="reference i (blue) → target j (red)",
+    )
+    a1.imshow(_to_hwc(pair[0]))
+    a1.set_axis_off()
+    a1.set_title(f"reference i={i}\nφ = {math.degrees(phi_i):.0f}°")
+    a2.imshow(_to_hwc(pair[1]))
+    a2.set_axis_off()
+    a2.set_title(f"target j={j}\nφ = {math.degrees(phi_j):.0f}°")
+
+    fig.suptitle(
+        f"Δφ(i→j) = φ_j − φ_i = {math.degrees(dphi_wrapped):+.0f}°"
+        f"   →  (cos Δφ, sin Δφ) = ({math.cos(dphi):+.2f}, {math.sin(dphi):+.2f})"
+    )
     fig.tight_layout()
     return fig

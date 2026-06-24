@@ -101,3 +101,51 @@ def check_translation_invariants(delta: torch.Tensor, atol: float = 1e-5) -> Non
         delta, -delta.transpose(-2, -1), atol=atol
     ), "translation table is not anti-symmetric (negative symmetry violated)"
     assert delta.shape == (2, n, n)
+
+
+# --------------------------------------------------------------------------- #
+# Relative orientation (RoPART rotation channel-group)
+# --------------------------------------------------------------------------- #
+
+
+def relative_orientation(angles: torch.Tensor) -> torch.Tensor:
+    """Build the relative-orientation target ``(cos Δφ, sin Δφ)`` over ordered pairs.
+
+    For every ordered pair ``(i, j)`` the relative orientation is
+    ``Δφ = φ_j - φ_i`` (reference ``i``, target ``j`` — the same convention as
+    :func:`relative_translation`), encoded as ``(cos Δφ, sin Δφ)``. The
+    ``(cos, sin)`` encoding is smooth and free of the ``±π`` wrap, so plain MSE on
+    it is a valid angular loss; a raw angle is never regressed directly. This is the RoPART rotation channel-group.
+
+    Args:
+        angles: ``(N,)`` per-patch orientations in radians.
+
+    Returns:
+        ``(2, N, N)`` float tensor: channel 0 ``cos(φ_j - φ_i)``, channel 1
+        ``sin(φ_j - φ_i)``.
+    """
+    angles = angles.float()
+    dphi = angles[None, :] - angles[:, None]  # (N, N): [i, j] = φ_j - φ_i
+    return torch.stack((torch.cos(dphi), torch.sin(dphi)), dim=0)  # (2, N, N)
+
+
+def check_orientation_invariants(rot: torch.Tensor, atol: float = 1e-5) -> None:
+    """Assert the structural invariants of a ``(cos Δφ, sin Δφ)`` target table.
+
+    * diagonal ``(cos, sin) = (1, 0)`` — zero relative orientation to itself;
+    * ``cos`` **symmetric** — ``cos Δφ(i,j) == cos Δφ(j,i)`` (cosine is even);
+    * ``sin`` **anti-symmetric** — ``sin Δφ(i,j) == -sin Δφ(j,i)``. This is the
+      rotational negative symmetry, the analogue of PART's translational result
+      (Figure 6) and one of RoPART's intrinsic evaluation axes.
+
+    Args:
+        rot: ``(2, N, N)`` relative-orientation table from :func:`relative_orientation`.
+        atol: absolute tolerance for the float comparisons.
+    """
+    cos, sin = rot[0], rot[1]
+    n = cos.shape[-1]
+    assert rot.shape == (2, n, n)
+    assert torch.allclose(torch.diagonal(cos), torch.ones(n), atol=atol), "cos diagonal != 1"
+    assert torch.allclose(torch.diagonal(sin), torch.zeros(n), atol=atol), "sin diagonal != 0"
+    assert torch.allclose(cos, cos.transpose(-2, -1), atol=atol), "cos not symmetric"
+    assert torch.allclose(sin, -sin.transpose(-2, -1), atol=atol), "sin not anti-symmetric"

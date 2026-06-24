@@ -16,6 +16,13 @@ Compared with upstream we deliberately drop: the precomputed candidate-box bank
 variants (``v1``/``v2``/``v3_1``), ``skimage`` resizing (constant size needs no
 resize), and all the dataset/dataloader machinery.
 
+Rotation (the RoPART extension) is **additive**: :func:`sample_rotation_angles`
+and :func:`crop_patches_rotated` add a uniformly random per-patch orientation,
+rotating pixels about the patch **centre** (the rotation-invariant anchor). The
+baseline path (:func:`sample_offgrid_patches`
+with the default ``margin=0``, plus :func:`crop_patches`) is unchanged when
+rotation is unused.
+
 Everything is plain ``float32`` and device-agnostic so the same code runs under
 MPS locally and CUDA on the cluster.
 """
@@ -26,7 +33,9 @@ import math
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
+from torchvision.transforms.functional import gaussian_blur as _tv_gaussian_blur
 
 # Box rows, matching upstream's target layout: (x_start, y_start, x_end, y_end).
 X_S, Y_S, X_E, Y_E = 0, 1, 2, 3
@@ -53,14 +62,15 @@ def sample_offgrid_patches(
     patch_size: int,
     num_patches: int,
     *,
+    margin: int = 0,
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
     """Sample ``num_patches`` off-grid, constant-size patch boxes.
 
     Each patch is ``patch_size x patch_size`` with its top-left corner drawn
     uniformly (and independently per axis) from the continuous range of valid
-    pixel offsets ``[0, img_size - patch_size]``. Patches may overlap — that is
-    expected for off-grid sampling.
+    pixel offsets ``[margin, img_size - patch_size - margin]``. Patches may
+    overlap — that is expected for off-grid sampling.
 
     Upstream (``make_dataset.py::VectorizedCIFAR``, ``v3``) instead samples four
     independent coordinates and takes ``(min, max)``, giving *variable*-size
@@ -71,6 +81,10 @@ def sample_offgrid_patches(
         img_size: side length of the (square) source image, in pixels.
         patch_size: side length of every patch, in pixels.
         num_patches: number of patches to sample.
+        margin: keep every patch's top-left corner at least this many pixels from
+            the image edges. ``0`` (default) is the baseline behaviour; pass
+            :func:`rotation_margin` when patches will be rotated, so the
+            diagonal-sized source window stays in-image.
         generator: optional ``torch.Generator`` for reproducible sampling.
 
     Returns:
@@ -80,12 +94,23 @@ def sample_offgrid_patches(
     if patch_size > img_size:
         raise ValueError(f"patch_size ({patch_size}) must be <= img_size ({img_size})")
 
-    high = img_size - patch_size + 1  # randint's high is exclusive
-    x_s = torch.randint(0, high, (num_patches,), generator=generator)
-    y_s = torch.randint(0, high, (num_patches,), generator=generator)
+    high = img_size - patch_size - margin + 1  # randint's high is exclusive
+    if high <= margin:
+        raise ValueError(
+            f"no valid positions: img_size={img_size}, patch_size={patch_size}, "
+            f"margin={margin} leaves an empty range"
+        )
+    x_s = torch.randint(margin, high, (num_patches,), generator=generator)
+    y_s = torch.randint(margin, high, (num_patches,), generator=generator)
     x_e = x_s + patch_size
     y_e = y_s + patch_size
     return torch.stack((x_s, y_s, x_e, y_e), dim=0)  # [4, num_patches]
+
+
+def _image_to_chw_float(image: np.ndarray) -> torch.Tensor:
+    """``(H, W, C)`` uint8 array -> contiguous ``(C, H, W)`` float32 tensor in ``[0, 1]``."""
+    img = torch.from_numpy(image.copy()).float().div(255.0)  # (H, W, C)
+    return img.permute(2, 0, 1).contiguous()  # (C, H, W)
 
 
 def crop_patches(image: np.ndarray, boxes: torch.Tensor) -> torch.Tensor:
@@ -94,7 +119,7 @@ def crop_patches(image: np.ndarray, boxes: torch.Tensor) -> torch.Tensor:
     This is the constant-size simplification of upstream
     ``patchify_and_resize``: because every box is already ``patch_size`` square,
     no resize is needed (upstream resizes only because its ``v3`` boxes vary in
-    size).
+    size). Axis-aligned only — see :func:`crop_patches_rotated` for orientation.
 
     Args:
         image: ``(H, W, C)`` uint8 array.
@@ -105,9 +130,7 @@ def crop_patches(image: np.ndarray, boxes: torch.Tensor) -> torch.Tensor:
         ``float32`` tensor of shape ``(num_patches, C, patch_h, patch_w)`` in
         ``[0, 1]``.
     """
-    img = torch.from_numpy(image.copy()).float().div(255.0)  # (H, W, C)
-    img = img.permute(2, 0, 1)  # (C, H, W)
-
+    img = _image_to_chw_float(image)  # (C, H, W)
     patches = []
     for x_s, y_s, x_e, y_e in boxes.T.tolist():
         patches.append(img[:, y_s:y_e, x_s:x_e])
@@ -151,3 +174,197 @@ def retile_patches(patches: torch.Tensor, img_size: int) -> torch.Tensor:
     out = out.reshape(c, patches_per_width, patches_per_width, ph, pw)
     out = out.permute(0, 1, 3, 2, 4).reshape(c, img_size, img_size)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Rotation (RoPART extension)
+# --------------------------------------------------------------------------- #
+
+
+def rotation_window_size(patch_size: int) -> int:
+    """Side of the source window that fully contains a rotated ``patch_size`` square.
+
+    A ``patch_size`` square rotated by any angle fits inside its diagonal,
+    ``ceil(patch_size * sqrt(2))``. Reading from a window this large lets
+    :func:`crop_patches_rotated` fill the rotated patch with real pixels (no
+    empty corners).
+    """
+    return math.ceil(patch_size * math.sqrt(2))
+
+
+def rotation_margin(patch_size: int) -> int:
+    """Edge margin (px) a patch centre needs so its rotation window stays in-image.
+
+    Pass this as ``margin`` to :func:`sample_offgrid_patches` when patches will be
+    rotated, so the diagonal-sized source window never falls off the image (which
+    would otherwise leave black slivers at oblique angles).
+    """
+    return (rotation_window_size(patch_size) - patch_size + 1) // 2
+
+
+def sample_rotation_angles(
+    num_patches: int,
+    *,
+    low: float = 0.0,
+    high: float = 2.0 * math.pi,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """Sample one uniformly random orientation per patch.
+
+    Args:
+        num_patches: number of angles to sample.
+        low, high: range in **radians** (default ``[0, 2π)`` — a uniformly random
+            rotation in SO(2)).
+        generator: optional ``torch.Generator`` for reproducible sampling.
+
+    Returns:
+        ``float32`` tensor of shape ``(num_patches,)`` in radians.
+    """
+    return (torch.rand(num_patches, generator=generator) * (high - low) + low).float()
+
+
+def crop_patches_rotated(
+    image: np.ndarray,
+    boxes: torch.Tensor,
+    angles: torch.Tensor,
+    *,
+    fill_corners: bool = True,
+    interpolation: str = "bilinear",
+    supersample: int = 1,
+    padding_mode: str = "zeros",
+) -> torch.Tensor:
+    """Crop each box rotated by its angle, resampling the pixels once.
+
+    For patch ``k`` the output pixel at patch-local offset ``(lx, ly)`` (centred,
+    pixel-centre coordinates) reads the source at
+
+        (sx, sy) = centre + R(φ_k) · (lx, ly),   R(φ) = [[cos, -sin], [sin, cos]]
+
+    so the patch footprint on the source is the ``patch_size`` square rotated by
+    ``φ_k`` about the patch **centre** (the rotation-invariant anchor). A single
+    ``grid_sample`` does the resampling, i.e. exactly one interpolation.
+
+    Args:
+        image: ``(H, W, C)`` uint8 array.
+        boxes: ``(4, N)`` integer box tensor (constant ``patch_size`` squares).
+        angles: ``(N,)`` orientations in radians (see :func:`sample_rotation_angles`).
+        fill_corners: if ``True`` (default), sample from the full image so the
+            rotated patch has **no empty corners** (requires the centre to be at
+            least :func:`rotation_margin` from the edges). If ``False``, rotate the
+            axis-aligned ``patch_size`` crop in isolation, leaving the **empty
+            (black) corners** the diagonal-window method exists to avoid — useful
+            for *seeing* that artefact.
+        interpolation: ``"bilinear"`` (default) or ``"nearest"``. Nearest avoids
+            the resampling blur but aliases; bilinear is the standard choice, and
+            its angle-dependent blur is the interpolation confound (Validity
+            threat #1).
+        supersample: anti-aliasing factor — control (c). With ``k > 1`` the source
+            is bicubically upsampled by ``k`` before sampling, so the bilinear read
+            happens on a ``k``× denser grid (fractional offsets shrink ~``1/k``).
+            This makes the resampling near-lossless and its blur near
+            angle-independent, removing the confound at the source. ``1`` (default)
+            is the plain, confounded path.
+        padding_mode: ``grid_sample`` padding for samples outside the source
+            (``"zeros"``, ``"border"`` or ``"reflection"``).
+
+    Returns:
+        ``float32`` tensor of shape ``(N, C, patch_size, patch_size)`` in ``[0, 1]``.
+    """
+    if interpolation not in ("bilinear", "nearest"):
+        raise ValueError(f"interpolation must be 'bilinear' or 'nearest', got {interpolation!r}")
+    if supersample < 1:
+        raise ValueError(f"supersample must be >= 1, got {supersample}")
+
+    img = _image_to_chw_float(image)  # (C, H, W)
+    h0, w0 = img.shape[-2], img.shape[-1]
+    angles_l = angles.float().tolist()
+
+    # Upsample the shared full image once (control (c)). We normalise grid
+    # coordinates against the ORIGINAL extent and rely on align_corners=True so the
+    # upsampled source maps to the same physical coordinates.
+    full_src = img
+    if fill_corners and supersample > 1:
+        full_src = F.interpolate(
+            img[None], scale_factor=supersample, mode="bicubic", align_corners=True
+        ).clamp_(0.0, 1.0)[0]
+
+    patches = []
+    for (x_s, y_s, x_e, y_e), phi in zip(boxes.T.tolist(), angles_l):
+        ps = x_e - x_s
+        cos, sin = math.cos(phi), math.sin(phi)
+
+        # patch-local pixel-centre coordinates, centred on 0 (output is ps×ps;
+        # supersampling raises the SOURCE resolution, not the output count)
+        idx = torch.arange(ps, dtype=torch.float32) - (ps - 1) / 2.0
+        ly, lx = torch.meshgrid(idx, idx, indexing="ij")
+
+        if fill_corners:
+            src = full_src
+            # pixel-index centre (not the geometric (x_s+x_e)/2): with
+            # align_corners=True an integer coordinate hits a pixel centre exactly,
+            # so this keeps axis-aligned angles (φ = 0, 90°, …) interpolation-free.
+            cx = (x_s + x_e - 1) / 2.0
+            cy = (y_s + y_e - 1) / 2.0
+            norm_w, norm_h = w0, h0
+        else:
+            src = img[:, y_s:y_e, x_s:x_e]
+            if supersample > 1:
+                src = F.interpolate(
+                    src[None], scale_factor=supersample, mode="bicubic", align_corners=True
+                ).clamp_(0.0, 1.0)[0]
+            cx = cy = (ps - 1) / 2.0
+            norm_w = norm_h = ps
+
+        sx = cx + cos * lx - sin * ly
+        sy = cy + sin * lx + cos * ly
+
+        # normalise to [-1, 1] against the original extent for grid_sample(align_corners=True)
+        gx = sx / ((norm_w - 1) / 2.0) - 1.0
+        gy = sy / ((norm_h - 1) / 2.0) - 1.0
+        grid = torch.stack((gx, gy), dim=-1)[None]  # (1, ps, ps, 2)
+
+        patch = F.grid_sample(
+            src[None], grid, mode=interpolation, padding_mode=padding_mode, align_corners=True
+        )[0]
+        patches.append(patch)
+    return torch.stack(patches, dim=0)  # (N, C, ps, ps)
+
+
+def _odd_kernel_for_sigma(sigma: float) -> int:
+    """Smallest odd Gaussian kernel size covering ~3σ each side."""
+    return max(int(2 * round(3.0 * sigma) + 1), 3)
+
+
+def gaussian_blur_patches(
+    patches: torch.Tensor,
+    sigma: float | torch.Tensor,
+) -> torch.Tensor:
+    """Gaussian-blur patches, optionally with a per-patch ``sigma``.
+
+    A building block for the **matched-blur control** of the interpolation
+    confound (Validity threat #1): rotation blurs oblique angles more than
+    axis-aligned ones, so adding compensating blur to the sharper patches can
+    flatten the orientation-correlated sharpness cue. ``sigma <= 0`` leaves a
+    patch unchanged.
+
+    Args:
+        patches: ``(N, C, H, W)`` batch or a single ``(C, H, W)`` patch.
+        sigma: scalar (same blur for all) or ``(N,)`` tensor (per-patch), in pixels.
+
+    Returns:
+        Blurred tensor of the same shape as ``patches``.
+    """
+    single = patches.dim() == 3
+    x = patches[None] if single else patches
+
+    if torch.is_tensor(sigma):
+        out = torch.stack(
+            [
+                p if s <= 0 else _tv_gaussian_blur(p, _odd_kernel_for_sigma(s), s)
+                for p, s in zip(x, sigma.tolist())
+            ]
+        )
+    else:
+        out = x if sigma <= 0 else _tv_gaussian_blur(x, _odd_kernel_for_sigma(sigma), sigma)
+
+    return out[0] if single else out
