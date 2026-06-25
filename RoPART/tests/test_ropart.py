@@ -18,6 +18,7 @@ from ropart.targets import build_targets, gather_pairs
 from ropart.losses import RelativeMSE
 from ropart.model import RoPARTViT
 from ropart.controls import build_extractor, available_controls
+from ropart.eval import _SqAcc, _accumulate, predict_table, report
 
 
 def test_targets_match_helpers_oracle():
@@ -103,6 +104,67 @@ def test_extractors_run_on_image():
     print("OK all (implemented) control extractors run end-to-end")
 
 
+class _IdxHead:
+    """Stub relative head: echoes the queried pair indices ``(i, j)`` as the two
+    output channels, so :func:`predict_table` placement can be checked."""
+
+    query_type = "oracle"
+
+    def __call__(self, feats, pairs):  # pairs (b, P, 2) -> (b, P, 2)
+        return pairs.float()
+
+
+class _OracleModel:
+    """Minimal stand-in exposing the surface :func:`predict_table` touches."""
+
+    num_channels = 2
+
+    def __init__(self, n: int, embed: int = 4):
+        self.n = n
+        self.embed = embed
+        self.head = _IdxHead()
+
+    def _encode(self, x, *, add_pos, mask):  # noqa: D401 - matches model signature
+        b = x.shape[0]
+        return torch.zeros(b, self.n + 1, self.embed, device=x.device)  # cls slot dropped by caller
+
+
+def test_eval_predict_table_orientation():
+    """``predict_table`` must place pair ``(i, j)`` at ``[:, :, i, j]`` — the same
+    (ref i, tgt j) orientation as ``build_targets`` — or every symmetry/composition
+    metric is silently transposed."""
+    n = 9
+    model = _OracleModel(n)
+    table = predict_table(model, torch.zeros(2, 3, 32, 32))  # (b, 2, n, n)
+    assert table.shape == (2, 2, n, n), table.shape
+    exp_i = torch.arange(n)[:, None].expand(n, n).float()  # row = ref i
+    exp_j = torch.arange(n)[None, :].expand(n, n).float()  # col = tgt j
+    assert torch.allclose(table[0, 0], exp_i), "channel 0 not indexed by ref i"
+    assert torch.allclose(table[0, 1], exp_j), "channel 1 not indexed by tgt j"
+    print("OK eval.predict_table orientation matches target convention")
+
+
+def test_eval_metrics_oracle():
+    """A perfect predictor (pred == target) must drive every 'want ~0' metric to ~0
+    and the MSE-vs-floor ratios to ~0 — guards the eval metric math itself."""
+    torch.manual_seed(0)
+    ps, n = 4, 64
+    boxes = torch.stack([sample_offgrid_patches(32, ps, n) for _ in range(3)])
+    angles = torch.stack([sample_rotation_angles(n) for _ in range(3)])
+    tgt = build_targets(boxes, angles, rotates=True, centered=True, normalize_by=ps)
+
+    acc = _SqAcc()
+    _accumulate(tgt.clone(), tgt, rotates=True, acc=acc, n_triples=2048)
+    m = report(acc, rotates=True, patch_size=ps)
+
+    assert m["mse_x_vs_floor"] < 1e-6 and m["mse_y_vs_floor"] < 1e-6
+    assert m["trans_rmse_px"] < 1e-3
+    assert m["identity_rmse_px"] < 1e-3 and m["identity_rot_rmse"] < 1e-4
+    assert m["neg_sym_xy_ratio"] < 1e-4 and m["neg_sym_rot_ratio"] < 1e-4
+    assert m["comp_xy_ratio"] < 1e-4 and m["comp_rot_mae_deg"] < 1e-2
+    print("OK eval metrics ~0 on a perfect predictor")
+
+
 if __name__ == "__main__":
     test_targets_match_helpers_oracle()
     test_invariants_on_batch()
@@ -111,4 +173,6 @@ if __name__ == "__main__":
     test_loss()
     test_controls_registry()
     test_extractors_run_on_image()
+    test_eval_predict_table_orientation()
+    test_eval_metrics_oracle()
     print("\nALL TESTS PASSED")
