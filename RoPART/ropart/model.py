@@ -305,6 +305,60 @@ class RoPARTViT(nn.Module):
         return self.clf(cls)
 
 
+# --------------------------------------------------------------------------- #
+# Model registry
+# --------------------------------------------------------------------------- #
+#
+# Maps a model name to its *architecture* dims (image/patch geometry + ViT width
+# and depth). The pretext-specific kwargs (``num_channels``, ``num_pairs``,
+# ``mask_prob``, ``num_classes``, …) are supplied by the caller, not here. Adding a
+# config is a one-line entry; ``model_config`` is the single place that turns a
+# name into geometry, so callers never re-parse the string (the old
+# ``train.parse_model_name`` mis-parsed two-digit patch sizes, e.g. ``patch16``).
+
+MODEL_CONFIGS: dict[str, dict] = {
+    # name: (img_size, patch_size, embed_dim, depth, num_heads)
+    "deit_small_patch4_32": dict(img_size=32, patch_size=4, embed_dim=384, depth=12, num_heads=6),
+    "deit_small_patch8_32": dict(img_size=32, patch_size=8, embed_dim=384, depth=12, num_heads=6),
+    "deit_small_patch16_224": dict(img_size=224, patch_size=16, embed_dim=384, depth=12, num_heads=6),
+    "deit_base_patch16_224": dict(img_size=224, patch_size=16, embed_dim=768, depth=12, num_heads=12),
+}
+
+
+def model_config(name: str) -> dict:
+    """Return the architecture dims for a registered model name.
+
+    Args:
+        name: a key of :data:`MODEL_CONFIGS`, e.g. ``"deit_base_patch16_224"``.
+
+    Returns:
+        A fresh dict with ``img_size, patch_size, embed_dim, depth, num_heads``.
+    """
+    if name not in MODEL_CONFIGS:
+        raise ValueError(f"unknown model {name!r}; available: {sorted(MODEL_CONFIGS)}")
+    return dict(MODEL_CONFIGS[name])
+
+
+def build_model(name: str, **kwargs) -> RoPARTViT:
+    """Construct a :class:`RoPARTViT` from a registered name plus pretext kwargs.
+
+    ``kwargs`` (e.g. ``num_classes``, ``num_channels``, ``num_pairs``, ``mask_prob``,
+    ``drop_path_rate``, ``cross_attention_query_type``) override / extend the
+    architecture dims from :func:`model_config`.
+    """
+    return RoPARTViT(**model_config(name), **kwargs)
+
+
 def deit_small_patch4_32(**kwargs) -> RoPARTViT:
     """ViT-S/4 for 32x32 — the CIFAR-100 workhorse (matches upstream config)."""
-    return RoPARTViT(img_size=32, patch_size=4, embed_dim=384, depth=12, num_heads=6, **kwargs)
+    return build_model("deit_small_patch4_32", **kwargs)
+
+
+def deit_small_patch16_224(**kwargs) -> RoPARTViT:
+    """ViT-S/16 for 224x224 — light ImageNet option."""
+    return build_model("deit_small_patch16_224", **kwargs)
+
+
+def deit_base_patch16_224(**kwargs) -> RoPARTViT:
+    """ViT-B/16 for 224x224 — the ImageNet workhorse (matches the source paper)."""
+    return build_model("deit_base_patch16_224", **kwargs)

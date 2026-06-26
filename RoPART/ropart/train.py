@@ -25,10 +25,15 @@ import numpy as np
 import torch
 
 from ropart.controls import available_controls, build_extractor
-from ropart.data import RoPARTCIFAR, build_cls_dataset
+from ropart.data import (
+    RoPARTCIFAR,
+    RoPARTImageFolder,
+    build_cls_dataset,
+    build_cls_dataset_imagenet,
+)
 from ropart.engine import cls_run_epoch, pretrain_run_epoch
 from ropart.losses import RelativeMSE
-from ropart.model import RoPARTViT
+from ropart.model import RoPARTViT, model_config
 from ropart.targets import build_targets, gather_pairs
 
 
@@ -54,10 +59,28 @@ def set_seed(seed: int):
 
 
 def parse_model_name(name: str) -> tuple[int, int]:
-    """'deit_small_patch4_32' -> (img_size=32, patch_size=4)."""
-    img_size = int(name.split("_")[-1])
-    patch_size = int(name.split("_")[-2][-1])
-    return img_size, patch_size
+    """``'deit_base_patch16_224'`` -> ``(img_size, patch_size)`` via the registry.
+
+    Thin compat shim over :func:`ropart.model.model_config` (used by ``ropart.eval``);
+    unlike the old string-slicing version it parses two-digit patch sizes correctly.
+    """
+    cfg = model_config(name)
+    return cfg["img_size"], cfg["patch_size"]
+
+
+def build_pretrain_dataset(args, cfg: dict, extractor, rotates: bool, *, train: bool):
+    """CIFAR-100 or ImageNet-100 pretraining dataset, per ``--data-set``.
+
+    Both share the off-grid sampling + control extraction + retile packing; they
+    differ only in the image source (CIFAR's in-memory array vs ImageFolder JPEGs).
+    """
+    common = dict(
+        extractor=extractor, rotates=rotates,
+        img_size=cfg["img_size"], patch_size=cfg["patch_size"], train=train,
+    )
+    if args.data_set == "IMAGENET":
+        return RoPARTImageFolder(args.data_path, **common)
+    return RoPARTCIFAR(args.data_path, **common)
 
 
 def lr_at(epoch: int, args) -> float:
@@ -148,16 +171,27 @@ class WandbRun:
                 self.enabled = False
 
     def log(self, data: dict, step: int | None = None):
-        if self.enabled:
-            import wandb
+        # A wandb hiccup (dropped socket, dead internal process, sync error) must
+        # never kill a multi-hour pretraining run: on failure, warn once and disable
+        # wandb for the rest of the run — training and checkpointing carry on.
+        if not self.enabled:
+            return
+        import wandb
 
+        try:
             wandb.log(data, step=step)
+        except Exception as e:
+            print(f"[wandb] log failed ({e}); disabling wandb for the rest of the run")
+            self.enabled = False
 
     def finish(self):
         if self.enabled:
             import wandb
 
-            wandb.finish()
+            try:
+                wandb.finish()
+            except Exception as e:
+                print(f"[wandb] finish failed ({e}); ignoring")
 
 
 def save_checkpoint(path: Path, model, optimizer, epoch, args, extra: dict):
@@ -180,7 +214,8 @@ def save_checkpoint(path: Path, model, optimizer, epoch, args, extra: dict):
 
 
 def run_pretrain(args, device):
-    img_size, patch_size = parse_model_name(args.model)
+    cfg = model_config(args.model)
+    patch_size = cfg["patch_size"]
 
     control = args.control or ("raw" if args.rotation else "translation")
     control_kw = {}
@@ -191,12 +226,11 @@ def run_pretrain(args, device):
     elif control == "randomised":
         control_kw["sigma_max"] = args.sigma_max
     extractor, num_channels, rotates = build_extractor(control, **control_kw)
-    print(f"control={control}  num_channels={num_channels}  rotates={rotates}")
+    print(f"control={control}  num_channels={num_channels}  rotates={rotates}  "
+          f"data={args.data_set}  model={args.model}")
 
-    train_ds = RoPARTCIFAR(args.data_path, extractor=extractor, rotates=rotates,
-                           img_size=img_size, patch_size=patch_size, train=True)
-    val_ds = RoPARTCIFAR(args.data_path, extractor=extractor, rotates=rotates,
-                         img_size=img_size, patch_size=patch_size, train=False)
+    train_ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=True)
+    val_ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=False)
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True,
         **loader_kwargs(args, device),
@@ -207,7 +241,7 @@ def run_pretrain(args, device):
     )
 
     model = RoPARTViT(
-        img_size=img_size, patch_size=patch_size, num_classes=100,
+        **cfg, num_classes=args.num_classes,
         num_channels=num_channels, num_pairs=args.num_pairs, mask_prob=args.mask_prob,
         drop_path_rate=args.drop_path, cross_attention_query_type=args.query_type,
     ).to(device)
@@ -284,13 +318,14 @@ def run_overfit(args, device):
     pinned at the floor here, the bug is in the model/loss/gradient path, not the
     data scale or the schedule.
     """
-    img_size, patch_size = parse_model_name(args.model)
+    cfg = model_config(args.model)
+    patch_size = cfg["patch_size"]
     control = args.control or ("raw" if args.rotation else "translation")
     extractor, num_channels, rotates = build_extractor(control)
-    print(f"[overfit] control={control} num_channels={num_channels} rotates={rotates}")
+    print(f"[overfit] control={control} num_channels={num_channels} rotates={rotates} "
+          f"data={args.data_set} model={args.model}")
 
-    ds = RoPARTCIFAR(args.data_path, extractor=extractor, rotates=rotates,
-                     img_size=img_size, patch_size=patch_size, train=True)
+    ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=True)
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True,
                                          num_workers=0, drop_last=True)
     packed, boxes, angles = next(iter(loader))
@@ -298,7 +333,7 @@ def run_overfit(args, device):
     boxes = boxes.to(device)
     angles = angles.to(device)
 
-    model = RoPARTViT(img_size=img_size, patch_size=patch_size, num_classes=100,
+    model = RoPARTViT(**cfg, num_classes=args.num_classes,
                       num_channels=num_channels, num_pairs=args.num_pairs,
                       mask_prob=args.mask_prob,
                       cross_attention_query_type=args.query_type).to(device)
@@ -334,14 +369,15 @@ def run_linear_probe(args, device):
     assert args.resume, "--linear-probe needs --resume <pretrain checkpoint>"
     ckpt = torch.load(args.resume, map_location="cpu")
     ckpt_args = ckpt.get("args", {})
-    img_size, patch_size = parse_model_name(ckpt_args.get("model", args.model))
+    cfg = model_config(ckpt_args.get("model", args.model))
+    img_size = cfg["img_size"]
     num_channels = ckpt_args.get("num_channels", 2)
     # num_channels may not be stored directly; infer from head weight if needed
     head_w = ckpt["model"].get("head.output_project.weight")
     if head_w is not None:
         num_channels = head_w.shape[0]
 
-    model = RoPARTViT(img_size=img_size, patch_size=patch_size, num_classes=100,
+    model = RoPARTViT(**cfg, num_classes=args.num_classes,
                       num_channels=num_channels, mask_prob=0.0).to(device)
     missing = model.load_state_dict(ckpt["model"], strict=False)
     print(f"probe: loaded encoder (missing={len(missing.missing_keys)}, "
@@ -350,11 +386,14 @@ def run_linear_probe(args, device):
     # freeze everything, re-init + train the classifier only
     for p in model.parameters():
         p.requires_grad = False
-    model.clf = torch.nn.Linear(model.embed_dim, 100).to(device)
+    model.clf = torch.nn.Linear(model.embed_dim, args.num_classes).to(device)
     for p in model.clf.parameters():
         p.requires_grad = True
 
-    train_ds, val_ds = build_cls_dataset(args.data_path, img_size=img_size)
+    if args.data_set == "IMAGENET":
+        train_ds, val_ds = build_cls_dataset_imagenet(args.data_path, img_size=img_size)
+    else:
+        train_ds, val_ds = build_cls_dataset(args.data_path, img_size=img_size)
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True,
         **loader_kwargs(args, device))
@@ -392,6 +431,10 @@ def run_linear_probe(args, device):
 def get_args():
     p = argparse.ArgumentParser("RoPART training")
     p.add_argument("--model", default="deit_small_patch4_32")
+    p.add_argument("--data-set", default="CIFAR", choices=["CIFAR", "IMAGENET"],
+                   help="CIFAR-100 (in-memory) or ImageNet-100 (ImageFolder at --data-path)")
+    p.add_argument("--num-classes", default=100, type=int,
+                   help="classifier head width (probe/finetune); pretext is label-free")
     p.add_argument("--data-path", default="./data")
     p.add_argument("--output_dir", default="./out")
     p.add_argument("--device", default="auto")

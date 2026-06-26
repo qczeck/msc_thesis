@@ -74,6 +74,28 @@ def test_model_forward():
     print("OK model forward (pretrain + classify), num_channels 2 and 4")
 
 
+def test_model_registry():
+    from ropart.model import model_config
+    from ropart.train import parse_model_name
+
+    # ViT-S/4 dims unchanged (the CIFAR baseline must not move)
+    assert model_config("deit_small_patch4_32") == dict(
+        img_size=32, patch_size=4, embed_dim=384, depth=12, num_heads=6)
+    # ViT-B/16 for ImageNet
+    base = model_config("deit_base_patch16_224")
+    assert (base["embed_dim"], base["depth"], base["num_heads"]) == (768, 12, 12)
+    # two-digit patch size parses correctly (the old string-slice gave 6, not 16)
+    assert parse_model_name("deit_base_patch16_224") == (224, 16)
+    assert parse_model_name("deit_small_patch8_32") == (32, 8)
+    try:
+        model_config("nope")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown model should raise")
+    print("OK model registry (dims + two-digit patch parse)")
+
+
 def test_loss():
     crit = RelativeMSE()
     for nc in (2, 4):
