@@ -13,4 +13,5 @@
 # SLURM spools the batch script, so $0 is not the repo path — locate via REPO.
 REPO="${REPO:-${HOME}/msc_thesis/RoPART}"
 source "${REPO}/ropart/scripts/cluster/_imagenet_env.sh"
-run_imagenet raw ropart-in100-rotation-raw "$@"
+# --clip-grad 1.0: the P=8 raw run logged grad_norm=Inf at its last step; clip here.
+run_imagenet raw ropart-in100-rotation-raw --clip-grad 1.0 "$@"
