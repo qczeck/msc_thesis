@@ -15,8 +15,21 @@ so the ~15 GB HF cache does not land on the NFS home quota.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
+
+
+def _safe_class_dir(label_idx: int, label_name: str) -> str:
+    """Filesystem-safe, sortable class-dir name, identical across train/val.
+
+    The HF mirror exposes human-readable class names (``'bonnet, poke bonnet'``),
+    not wnids, so spaces/commas would land in paths. Zero-pad the label index so the
+    ImageFolder sort order matches the original label order, and append a slugged
+    name for readability.
+    """
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", label_name).strip("_").lower()
+    return f"{label_idx:03d}_{slug}"
 
 
 def _val_split_name(splits) -> str:
@@ -48,8 +61,8 @@ def main() -> None:
         # bucket counts so we can skip already-complete class dirs on resume
         written = 0
         for i, ex in enumerate(d):
-            wnid = label_feat.int2str(int(ex["label"]))
-            cls_dir = out / dst_split / wnid
+            label_idx = int(ex["label"])
+            cls_dir = out / dst_split / _safe_class_dir(label_idx, label_feat.int2str(label_idx))
             cls_dir.mkdir(parents=True, exist_ok=True)
             dst = cls_dir / f"{i:08d}.jpg"
             if dst.exists():
