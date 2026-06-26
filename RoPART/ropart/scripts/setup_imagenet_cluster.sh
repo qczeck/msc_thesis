@@ -15,12 +15,19 @@ cd "$(dirname "$0")/../.."   # -> RoPART/
 WS_NAME="${WS_NAME:-ropart-in100}"
 HF_DATASET="${IN100_HF_DATASET:-clane9/imagenet-100}"
 
-# 1. Allocate (or reuse) a CephFS workspace.  ws_allocate is idempotent-ish: it
-#    prints the path and extends the lifetime if it already exists.
-if command -v ws_allocate >/dev/null 2>&1; then
-  WS="$(ws_allocate "${WS_NAME}" 365)"
+# 1. Resolve the CephFS workspace. The ws_* tools live ONLY on the cluster head
+#    nodes (gpucluster2/3); lab boxes like gpu30 just mount /vol/gpudata. So we
+#    allocate on the cluster first and only *resolve* the path here.
+if command -v ws_find >/dev/null 2>&1 && ws_find "${WS_NAME}" >/dev/null 2>&1; then
+  WS="$(ws_find "${WS_NAME}")"
+elif [ -n "${WS_DIR:-}" ]; then
+  WS="${WS_DIR}"
+elif [ -d "/vol/gpudata/${USER}-${WS_NAME}" ]; then
+  WS="/vol/gpudata/${USER}-${WS_NAME}"
 else
-  echo "ERROR: ws_allocate not found — are you on a DoC machine that mounts /vol/gpudata?" >&2
+  echo "ERROR: workspace '${WS_NAME}' not found under /vol/gpudata." >&2
+  echo "Allocate it on a cluster head node first, then re-run here:" >&2
+  echo "  ssh gpucluster2viashell1 'ws_allocate ${WS_NAME} 365'" >&2
   exit 1
 fi
 echo "[in100] workspace: ${WS}"

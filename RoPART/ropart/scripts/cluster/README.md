@@ -7,16 +7,25 @@ model). SLURM, single GPU, `a40` by default.
 > Scope note: this is ImageNet-**100** on **one** GPU — *not* the ImageNet-1K /
 > 8-GPU / ViT-B run, which is out of scope for this project.
 
-## 0. One-time data staging (on gpu30, NOT the cluster head nodes)
+## 0. One-time data staging
+
+The CephFS workspace tools (`ws_allocate`/`ws_find`) live only on the cluster head
+nodes; lab boxes like gpu30 just mount `/vol/gpudata`. So allocate on the cluster,
+then download from gpu30 (which has network + pip):
 
 ```bash
+# a) allocate the workspace (cluster head node)
+ssh gpucluster2viashell1 'ws_allocate ropart-in100 365'
+
+# b) download + materialise the data (gpu30 — NOT the head nodes)
 ssh gpu30viashell1
 cd ~/msc_thesis/RoPART && ropart/scripts/setup_imagenet_cluster.sh
 ```
 
-Allocates a `/vol/gpudata` workspace, downloads the standard ImageNet-100 subset
-(~15 GB) into `$WS/imagenet100/{train,val}/<wnid>/`, and prints the data path. The
-sbatch scripts resolve the workspace automatically via `ws_find ropart-in100`.
+Downloads the standard ImageNet-100 subset (~15 GB, HF `clane9/imagenet-100`,
+126 689 train / 5 000 val, 100 classes) into
+`$WS/imagenet100/{train,val}/<NNN_classname>/` and prints the data path. The sbatch
+scripts resolve the workspace automatically via `ws_find ropart-in100`.
 
 ## 1. Smoke test (decides online vs offline wandb)
 
