@@ -50,7 +50,7 @@ run_imagenet() {
     --data-set IMAGENET --data-path "${DATA}" \
     --model deit_base_patch16_224 \
     --control "${control}" --query-type patch_cat \
-    --num_pairs 256 --batch-size 192 \
+    --num_pairs 2048 --batch-size 192 \
     --epochs 100 --warmup-epochs 5 --lr 5e-4 --eval-every 5 \
     --num_workers 8 \
     --output_dir "${out}" \

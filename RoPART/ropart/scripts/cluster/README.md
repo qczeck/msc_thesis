@@ -48,7 +48,9 @@ sbatch ropart/scripts/cluster/pretrain_imagenet_baseline.sbatch
 sbatch ropart/scripts/cluster/pretrain_imagenet_rotation.sbatch
 ```
 
-Each is ViT-B/16 @224, 100 epochs, batch 192, `--num_pairs 256`, auto-resuming from
+Each is ViT-B/16 @224, 100 epochs, batch 192, `--num_pairs 2048` (upstream's
+512–4096 range — essential at 196 patches; 256 is too sparse and won't learn),
+auto-resuming from
 `$WS/out/in100_<control>/checkpoint.pth` if present (safe across requeue / the 3-day
 walltime). Extra args forward to `ropart.train`.
 
