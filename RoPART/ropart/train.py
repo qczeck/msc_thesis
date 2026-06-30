@@ -68,6 +68,29 @@ def parse_model_name(name: str) -> tuple[int, int]:
     return cfg["img_size"], cfg["patch_size"]
 
 
+def resolve_control(args) -> str:
+    """Resolve the control name, binding the ``quad`` control <-> quad sampler pair.
+
+    The ``quad`` control (exact ``rot90``) and quad angle sampling are a matched
+    pair: passing either ``--control quad`` or ``--rotation-set quad`` implies the
+    other, and a conflicting combination (e.g. ``--control raw --rotation-set quad``)
+    is rejected — quad angles through a bilinear extractor, or continuous angles
+    through ``rot90``, would desync the ``(cos, sin)`` target from the rotated pixels.
+    May mutate ``args.rotation_set`` so it is recorded consistently in the checkpoint.
+    """
+    control = args.control or ("raw" if args.rotation else "translation")
+    if args.rotation_set == "quad" and args.control is None and not args.rotation:
+        control = "quad"
+    if control == "quad":
+        args.rotation_set = "quad"
+    if (control == "quad") != (args.rotation_set == "quad"):
+        raise SystemExit(
+            f"--rotation-set quad pairs only with --control quad "
+            f"(got control={control!r}, rotation-set={args.rotation_set!r})"
+        )
+    return control
+
+
 def build_pretrain_dataset(args, cfg: dict, extractor, rotates: bool, *, train: bool):
     """CIFAR-100 or ImageNet-100 pretraining dataset, per ``--data-set``.
 
@@ -80,6 +103,7 @@ def build_pretrain_dataset(args, cfg: dict, extractor, rotates: bool, *, train: 
     )
     common = dict(
         extractor=extractor, rotates=rotates, max_angle=max_angle,
+        angle_set=args.rotation_set,
         img_size=cfg["img_size"], patch_size=cfg["patch_size"], train=train,
     )
     if args.data_set == "IMAGENET":
@@ -221,7 +245,7 @@ def run_pretrain(args, device):
     cfg = model_config(args.model)
     patch_size = cfg["patch_size"]
 
-    control = args.control or ("raw" if args.rotation else "translation")
+    control = resolve_control(args)
     control_kw = {}
     if control == "supersample":
         control_kw["factor"] = args.supersample
@@ -231,7 +255,7 @@ def run_pretrain(args, device):
         control_kw["sigma_max"] = args.sigma_max
     extractor, num_channels, rotates = build_extractor(control, **control_kw)
     print(f"control={control}  num_channels={num_channels}  rotates={rotates}  "
-          f"data={args.data_set}  model={args.model}")
+          f"rotation_set={args.rotation_set}  data={args.data_set}  model={args.model}")
 
     train_ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=True)
     val_ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=False)
@@ -324,10 +348,10 @@ def run_overfit(args, device):
     """
     cfg = model_config(args.model)
     patch_size = cfg["patch_size"]
-    control = args.control or ("raw" if args.rotation else "translation")
+    control = resolve_control(args)
     extractor, num_channels, rotates = build_extractor(control)
     print(f"[overfit] control={control} num_channels={num_channels} rotates={rotates} "
-          f"data={args.data_set} model={args.model}")
+          f"rotation_set={args.rotation_set} data={args.data_set} model={args.model}")
 
     ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=True)
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True,
@@ -477,6 +501,10 @@ def get_args():
                    help="half-range for per-patch orientation in degrees; unset = "
                         "full circle [0,360). e.g. 30 samples φ in [-30°, +30°] "
                         "(bounded-rotation experiment)")
+    p.add_argument("--rotation-set", default="continuous", choices=["continuous", "quad"],
+                   help="'continuous' (default): real-valued angles; 'quad': discrete "
+                        "{0,90,180,270}° via exact rot90 (RotNet-style, interpolation-"
+                        "free). Pairs with --control quad (either flag implies the other)")
     # control knobs
     p.add_argument("--supersample", default=4, type=int)
     p.add_argument("--sigma-lp", default=1.0, type=float)

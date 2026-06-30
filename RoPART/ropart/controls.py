@@ -25,6 +25,7 @@ import torch
 
 from helpers.sampling import (
     crop_patches,
+    crop_patches_quad,
     crop_patches_rotated,
     gaussian_blur_patches,
 )
@@ -47,6 +48,11 @@ def _extract_translation(image, boxes, angles=None):
 def _extract_raw(image, boxes, angles):
     """Plain bilinear rotation — confounded by interpolation blur."""
     return crop_patches_rotated(image, boxes, angles)
+
+
+def _extract_quad(image, boxes, angles):
+    """Exact 90° (quad) rotation via rot90 — interpolation-free (RotNet-style)."""
+    return crop_patches_quad(image, boxes, angles)
 
 
 def _extract_supersample(image, boxes, angles, *, factor=4):
@@ -94,6 +100,7 @@ def register_control(name: str, fn: Callable, *, rotates: bool, num_channels: in
 
 register_control("translation", _extract_translation, rotates=False, num_channels=2)
 register_control("raw", _extract_raw, rotates=True, num_channels=4)
+register_control("quad", _extract_quad, rotates=True, num_channels=4)
 register_control("supersample", _extract_supersample, rotates=True, num_channels=4)
 register_control("dominant", _extract_dominant, rotates=True, num_channels=4)
 register_control("randomised", _extract_randomised, rotates=True, num_channels=4)

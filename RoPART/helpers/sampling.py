@@ -223,6 +223,30 @@ def sample_rotation_angles(
     return (torch.rand(num_patches, generator=generator) * (high - low) + low).float()
 
 
+def sample_quad_rotations(
+    num_patches: int,
+    *,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """Sample one right-angle orientation per patch from ``{0, 90, 180, 270}°``.
+
+    The discrete (RotNet-style) restriction of :func:`sample_rotation_angles`:
+    angles in **radians** drawn uniformly from ``{0, π/2, π, 3π/2}``. Pairs with the
+    ``quad`` control (:func:`crop_patches_quad`), whose exact ``rot90`` extraction is
+    interpolation-free, so the rotation carries no angle-correlated blur cue.
+
+    Args:
+        num_patches: number of angles to sample.
+        generator: optional ``torch.Generator`` for reproducible sampling.
+
+    Returns:
+        ``float32`` tensor of shape ``(num_patches,)`` in radians, each a multiple
+        of ``π/2``.
+    """
+    k = torch.randint(0, 4, (num_patches,), generator=generator)
+    return (k.float() * (math.pi / 2.0)).float()
+
+
 def crop_patches_rotated(
     image: np.ndarray,
     boxes: torch.Tensor,
@@ -328,6 +352,43 @@ def crop_patches_rotated(
         )[0]
         patches.append(patch)
     return torch.stack(patches, dim=0)  # (N, C, ps, ps)
+
+
+def crop_patches_quad(
+    image: np.ndarray,
+    boxes: torch.Tensor,
+    angles: torch.Tensor,
+) -> torch.Tensor:
+    """Axis-aligned crops rotated by an exact multiple of 90° — no interpolation.
+
+    The discrete counterpart of :func:`crop_patches_rotated`. Each square patch is
+    cropped axis-aligned (:func:`crop_patches`) then turned by
+    ``k = round(angle / (π/2)) mod 4`` quarter-turns via :func:`torch.rot90` — an
+    exact pixel permutation. Because a ``P×P`` square maps onto itself under
+    ``rot90`` there is **no resampling** (hence no angle-correlated blur signature —
+    the interpolation confound vanishes) and **no** diagonal source window / rotation
+    margin is needed: boxes are sampled exactly like the translation baseline.
+
+    ``angles`` must be (near) multiples of ``π/2`` — i.e. produced by
+    :func:`sample_quad_rotations`. ``k`` counts counter-clockwise turns, defining the
+    ``+φ`` direction for this control; ``build_targets`` differences the *same*
+    ``angles``, so the ``(cos Δφ, sin Δφ)`` targets and the rotated pixels stay
+    consistent.
+
+    Args:
+        image: ``(H, W, C)`` uint8 array.
+        boxes: ``(4, num_patches)`` integer boxes (``P×P``, axis-aligned).
+        angles: ``(num_patches,)`` per-patch orientations in radians.
+
+    Returns:
+        ``float32`` tensor ``(num_patches, C, P, P)`` in ``[0, 1]``.
+    """
+    patches = crop_patches(image, boxes)  # (N, C, P, P)
+    ks = (torch.round(angles.float() / (math.pi / 2.0)).long() % 4).tolist()
+    out = torch.empty_like(patches)
+    for i, k in enumerate(ks):
+        out[i] = torch.rot90(patches[i], k, dims=(-2, -1))
+    return out
 
 
 def _odd_kernel_for_sigma(sigma: float) -> int:

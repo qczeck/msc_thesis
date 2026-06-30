@@ -27,6 +27,7 @@ from torchvision import datasets, transforms
 from helpers.sampling import (
     rotation_margin,
     sample_offgrid_patches,
+    sample_quad_rotations,
     sample_rotation_angles,
     retile_patches,
 )
@@ -53,6 +54,7 @@ def pack_patches_from_image(
     num_patches: int,
     margin: int,
     max_angle: float | None = None,
+    angle_set: str = "continuous",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Sample patches from one image and pack them into the ViT pseudo-image.
 
@@ -71,6 +73,10 @@ def pack_patches_from_image(
         max_angle: half-range for per-patch orientation, in **radians**. ``None``
             (default) samples the full circle ``[0, 2π)``; a value ``a`` samples
             symmetrically in ``[-a, +a]`` (the bounded-rotation experiment).
+            Ignored when ``angle_set == "quad"``.
+        angle_set: ``"continuous"`` (default) samples real-valued angles; ``"quad"``
+            samples discrete right angles ``{0, 90, 180, 270}°`` (pairs with the
+            ``quad`` control's exact ``rot90`` extraction).
 
     Returns:
         ``(packed [3, img_size, img_size], boxes [4, N], angles [N])``; ``angles``
@@ -79,6 +85,8 @@ def pack_patches_from_image(
     boxes = sample_offgrid_patches(img_size, patch_size, num_patches, margin=margin)
     if not rotates:
         angles = torch.zeros(num_patches)
+    elif angle_set == "quad":
+        angles = sample_quad_rotations(num_patches)
     elif max_angle is None:
         angles = sample_rotation_angles(num_patches)
     else:
@@ -106,6 +114,7 @@ class RoPARTCIFAR(datasets.CIFAR100):
         train: bool = True,
         download: bool = True,
         max_angle: float | None = None,
+        angle_set: str = "continuous",
     ):
         super().__init__(root, train=train, download=download)
         self.extractor = extractor
@@ -113,8 +122,10 @@ class RoPARTCIFAR(datasets.CIFAR100):
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
-        self.margin = rotation_margin(patch_size) if rotates else 0
+        # quad reads axis-aligned P×P (exact rot90), so it needs no diagonal margin.
+        self.margin = rotation_margin(patch_size) if (rotates and angle_set != "quad") else 0
         self.max_angle = max_angle
+        self.angle_set = angle_set
 
     def __getitem__(self, index: int):
         image = self.data[index]  # (H, W, C) uint8
@@ -122,7 +133,7 @@ class RoPARTCIFAR(datasets.CIFAR100):
             image, extractor=self.extractor, rotates=self.rotates,
             img_size=self.img_size, patch_size=self.patch_size,
             num_patches=self.num_patches, margin=self.margin,
-            max_angle=self.max_angle,
+            max_angle=self.max_angle, angle_set=self.angle_set,
         )
 
 
@@ -147,6 +158,7 @@ class RoPARTImageFolder(datasets.ImageFolder):
         patch_size: int = 16,
         train: bool = True,
         max_angle: float | None = None,
+        angle_set: str = "continuous",
     ):
         super().__init__(self._split_dir(root, train))
         self.extractor = extractor
@@ -154,8 +166,10 @@ class RoPARTImageFolder(datasets.ImageFolder):
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
-        self.margin = rotation_margin(patch_size) if rotates else 0
+        # quad reads axis-aligned P×P (exact rot90), so it needs no diagonal margin.
+        self.margin = rotation_margin(patch_size) if (rotates and angle_set != "quad") else 0
         self.max_angle = max_angle
+        self.angle_set = angle_set
 
     @staticmethod
     def _split_dir(root: str, train: bool) -> str:
@@ -173,7 +187,7 @@ class RoPARTImageFolder(datasets.ImageFolder):
             image, extractor=self.extractor, rotates=self.rotates,
             img_size=self.img_size, patch_size=self.patch_size,
             num_patches=self.num_patches, margin=self.margin,
-            max_angle=self.max_angle,
+            max_angle=self.max_angle, angle_set=self.angle_set,
         )
 
 

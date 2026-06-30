@@ -5,9 +5,17 @@
 
 import math
 
+import numpy as np
 import torch
 
-from helpers.sampling import sample_offgrid_patches, sample_rotation_angles, rotation_margin
+from helpers.sampling import (
+    sample_offgrid_patches,
+    sample_rotation_angles,
+    sample_quad_rotations,
+    rotation_margin,
+    crop_patches,
+    crop_patches_quad,
+)
 from helpers.targets import (
     relative_translation,
     relative_orientation,
@@ -150,6 +158,43 @@ def test_bounded_rotation_sampling():
     print("OK bounded rotation sampling")
 
 
+def test_quad_rotation_sampling():
+    """quad sampling yields only the four right angles {0, 90, 180, 270}°."""
+    ang = sample_quad_rotations(100000)
+    ks = torch.round(ang / (math.pi / 2)).long()
+    assert set(ks.tolist()) == {0, 1, 2, 3}                  # all four appear
+    assert torch.allclose(ang, ks.float() * (math.pi / 2))   # exact multiples
+    print("OK quad rotation sampling")
+
+
+def test_crop_patches_quad_is_exact_rot90():
+    """quad extraction is an exact rot90 of the axis-aligned crop — no resampling."""
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
+    n, ps = 4, 8
+    boxes = sample_offgrid_patches(32, ps, n, margin=0, generator=torch.Generator().manual_seed(1))
+    base = crop_patches(img, boxes)  # (n, C, P, P), axis-aligned reference
+    for k in range(4):
+        angles = torch.full((n,), k * math.pi / 2)
+        out = crop_patches_quad(img, boxes, angles)
+        expect = torch.rot90(base, k, dims=(-2, -1))
+        assert torch.equal(out, expect), f"k={k} not an exact rot90"
+    print("OK crop_patches_quad exact rot90")
+
+
+def test_quad_control_registered():
+    """The 'quad' control is registered, rotates, and emits 4 channels."""
+    assert "quad" in available_controls()
+    extractor, num_channels, rotates = build_extractor("quad")
+    assert rotates and num_channels == 4
+    rng = np.random.default_rng(2)
+    img = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
+    boxes = sample_offgrid_patches(32, 8, 4, margin=0)
+    patches = extractor(img, boxes, sample_quad_rotations(4))
+    assert patches.shape == (4, 3, 8, 8)
+    print("OK quad control registered + runs")
+
+
 def test_controls_registry():
     assert {"translation", "raw", "supersample", "dominant", "randomised", "matched"} <= set(available_controls())
     _, nc_t, rot_t = build_extractor("translation")
@@ -242,6 +287,9 @@ if __name__ == "__main__":
     test_loss_balance_default_unchanged()
     test_loss_balance_variance_rescales_groups()
     test_bounded_rotation_sampling()
+    test_quad_rotation_sampling()
+    test_crop_patches_quad_is_exact_rot90()
+    test_quad_control_registered()
     test_controls_registry()
     test_extractors_run_on_image()
     test_eval_predict_table_orientation()
