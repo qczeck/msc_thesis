@@ -42,7 +42,9 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 run_imagenet() {
   local control="$1"; shift
   local wname="$1"; shift
-  local out="${OUT_ROOT}/in100_${control}"
+  # OUT_NAME lets a variant run (e.g. bounded rotation, same 'raw' control) use its
+  # own checkpoint dir instead of clobbering/resuming the plain in100_<control> run.
+  local out="${OUT_ROOT}/${OUT_NAME:-in100_${control}}"
   local resume=()
   [ -f "${out}/checkpoint.pth" ] && resume=(--resume "${out}/checkpoint.pth") && \
     echo "[slurm] resuming from ${out}/checkpoint.pth"

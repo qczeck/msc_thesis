@@ -52,6 +52,7 @@ def pack_patches_from_image(
     patch_size: int,
     num_patches: int,
     margin: int,
+    max_angle: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Sample patches from one image and pack them into the ViT pseudo-image.
 
@@ -67,13 +68,21 @@ def pack_patches_from_image(
         patch_size: side of every patch, in pixels.
         num_patches: number of patches (must be a perfect square tiling ``img_size``).
         margin: edge margin for box sampling (``rotation_margin`` when ``rotates``).
+        max_angle: half-range for per-patch orientation, in **radians**. ``None``
+            (default) samples the full circle ``[0, 2π)``; a value ``a`` samples
+            symmetrically in ``[-a, +a]`` (the bounded-rotation experiment).
 
     Returns:
         ``(packed [3, img_size, img_size], boxes [4, N], angles [N])``; ``angles``
         is zeros when the control does not rotate.
     """
     boxes = sample_offgrid_patches(img_size, patch_size, num_patches, margin=margin)
-    angles = sample_rotation_angles(num_patches) if rotates else torch.zeros(num_patches)
+    if not rotates:
+        angles = torch.zeros(num_patches)
+    elif max_angle is None:
+        angles = sample_rotation_angles(num_patches)
+    else:
+        angles = sample_rotation_angles(num_patches, low=-max_angle, high=max_angle)
     patches = extractor(image, boxes, angles)  # (N, C, P, P) in [0, 1]
     packed = retile_patches(patches, img_size)  # (C, img, img)
     return _normalise(packed), boxes, angles
@@ -96,6 +105,7 @@ class RoPARTCIFAR(datasets.CIFAR100):
         patch_size: int = 4,
         train: bool = True,
         download: bool = True,
+        max_angle: float | None = None,
     ):
         super().__init__(root, train=train, download=download)
         self.extractor = extractor
@@ -104,6 +114,7 @@ class RoPARTCIFAR(datasets.CIFAR100):
         self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
         self.margin = rotation_margin(patch_size) if rotates else 0
+        self.max_angle = max_angle
 
     def __getitem__(self, index: int):
         image = self.data[index]  # (H, W, C) uint8
@@ -111,6 +122,7 @@ class RoPARTCIFAR(datasets.CIFAR100):
             image, extractor=self.extractor, rotates=self.rotates,
             img_size=self.img_size, patch_size=self.patch_size,
             num_patches=self.num_patches, margin=self.margin,
+            max_angle=self.max_angle,
         )
 
 
@@ -134,6 +146,7 @@ class RoPARTImageFolder(datasets.ImageFolder):
         img_size: int = 224,
         patch_size: int = 16,
         train: bool = True,
+        max_angle: float | None = None,
     ):
         super().__init__(self._split_dir(root, train))
         self.extractor = extractor
@@ -142,6 +155,7 @@ class RoPARTImageFolder(datasets.ImageFolder):
         self.patch_size = patch_size
         self.num_patches = (img_size // patch_size) ** 2
         self.margin = rotation_margin(patch_size) if rotates else 0
+        self.max_angle = max_angle
 
     @staticmethod
     def _split_dir(root: str, train: bool) -> str:
@@ -159,6 +173,7 @@ class RoPARTImageFolder(datasets.ImageFolder):
             image, extractor=self.extractor, rotates=self.rotates,
             img_size=self.img_size, patch_size=self.patch_size,
             num_patches=self.num_patches, margin=self.margin,
+            max_angle=self.max_angle,
         )
 
 

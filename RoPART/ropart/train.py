@@ -74,8 +74,12 @@ def build_pretrain_dataset(args, cfg: dict, extractor, rotates: bool, *, train: 
     Both share the off-grid sampling + control extraction + retile packing; they
     differ only in the image source (CIFAR's in-memory array vs ImageFolder JPEGs).
     """
+    max_angle = (
+        math.radians(args.rotation_max_deg)
+        if args.rotation_max_deg is not None else None
+    )
     common = dict(
-        extractor=extractor, rotates=rotates,
+        extractor=extractor, rotates=rotates, max_angle=max_angle,
         img_size=cfg["img_size"], patch_size=cfg["patch_size"], train=train,
     )
     if args.data_set == "IMAGENET":
@@ -247,7 +251,7 @@ def run_pretrain(args, device):
     ).to(device)
     print(f"params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi)
+    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi, balance=args.loss_balance)
     optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr, betas=(0.9, 0.999))
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
 
@@ -337,7 +341,7 @@ def run_overfit(args, device):
                       num_channels=num_channels, num_pairs=args.num_pairs,
                       mask_prob=args.mask_prob,
                       cross_attention_query_type=args.query_type).to(device)
-    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi)
+    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi, balance=args.loss_balance)
     optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr)
 
     targets_full = build_targets(boxes, angles if rotates else None, rotates=rotates,
@@ -464,6 +468,15 @@ def get_args():
     p.add_argument("--mask-prob", default=0.0, type=float)
     p.add_argument("--w-xy", default=1.0, type=float)
     p.add_argument("--w-phi", default=1.0, type=float)
+    p.add_argument("--loss-balance", default="none", choices=["none", "variance"],
+                   help="'none' (default, baseline-unchanged): raw grouped MSE; "
+                        "'variance': normalise each channel by its batch target "
+                        "variance so the translation and rotation groups are on a "
+                        "comparable scale (proper Δφ weighting)")
+    p.add_argument("--rotation-max-deg", default=None, type=float,
+                   help="half-range for per-patch orientation in degrees; unset = "
+                        "full circle [0,360). e.g. 30 samples φ in [-30°, +30°] "
+                        "(bounded-rotation experiment)")
     # control knobs
     p.add_argument("--supersample", default=4, type=int)
     p.add_argument("--sigma-lp", default=1.0, type=float)

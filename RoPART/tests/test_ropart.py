@@ -104,6 +104,52 @@ def test_loss():
     print("OK RelativeMSE")
 
 
+def test_loss_balance_default_unchanged():
+    """balance='none' (default) must be byte-identical to the raw grouped MSE."""
+    torch.manual_seed(0)
+    out, tgt = torch.randn(2, 4, 8), torch.randn(2, 4, 8)
+    se = (out - tgt) ** 2
+    expected = se[:, 0:2].mean() + se[:, 2:4].mean()
+    assert torch.allclose(RelativeMSE()(out, tgt), expected)
+    print("OK RelativeMSE balance=none unchanged")
+
+
+def test_loss_balance_variance_rescales_groups():
+    """balance='variance' lifts a tiny-scale rotation group to fraction-of-floor.
+
+    With a pixel-scale translation group and a unit-circle rotation group, the raw
+    loss is dominated by translation; the variance-balanced loss measures each group
+    as a fraction of its own floor, so a mean-predictor on both gives ~1 + ~1 = ~2.
+    """
+    torch.manual_seed(0)
+    n = 4096
+    tgt = torch.empty(1, 4, n)
+    tgt[:, 0:2] = torch.randn(1, 2, n) * 5.0            # translation, Var ~ 25
+    phi = (torch.rand(1, n) - 0.5) * (math.pi / 3)      # Δφ in [-30°, 30°]
+    tgt[:, 2] = torch.cos(phi)
+    tgt[:, 3] = torch.sin(phi)
+    # mean predictor for both groups
+    out = tgt.mean(dim=2, keepdim=True).expand_as(tgt).clone()
+
+    raw = RelativeMSE(balance="none")(out, tgt)
+    bal = RelativeMSE(balance="variance")(out, tgt)
+    # raw is swamped by the translation scale; balanced sits near 2 (two groups,
+    # each ~1× its floor under a mean predictor).
+    assert raw > 5.0
+    assert 1.5 < bal.item() < 2.5
+    print(f"OK RelativeMSE balance=variance (raw={raw:.1f}, bal={bal:.2f})")
+
+
+def test_bounded_rotation_sampling():
+    """max_angle bounds the sampled per-patch orientation to [-a, +a]."""
+    a = math.radians(30)
+    ang = sample_rotation_angles(100000, low=-a, high=a)
+    assert ang.min() >= -a - 1e-6 and ang.max() <= a + 1e-6
+    full = sample_rotation_angles(100000)
+    assert full.max() > a  # full circle reaches well beyond ±30°
+    print("OK bounded rotation sampling")
+
+
 def test_controls_registry():
     assert {"translation", "raw", "supersample", "dominant", "randomised", "matched"} <= set(available_controls())
     _, nc_t, rot_t = build_extractor("translation")
@@ -193,6 +239,9 @@ if __name__ == "__main__":
     test_gather_shapes()
     test_model_forward()
     test_loss()
+    test_loss_balance_default_unchanged()
+    test_loss_balance_variance_rescales_groups()
+    test_bounded_rotation_sampling()
     test_controls_registry()
     test_extractors_run_on_image()
     test_eval_predict_table_orientation()
