@@ -34,23 +34,31 @@ class RelativeMSE(nn.Module):
             translation-only baseline byte-for-byte unchanged); ``"variance"`` to
             normalise each channel by its detached batch target variance so the two
             groups are on a comparable scale.
+        eps: lower clamp on the per-channel variance divisor (``balance="variance"``
+            only). For very small rotation ranges the ``cos Δφ`` variance scales as
+            ``~angle**4`` and collapses toward zero, so an unclamped (or 1e-6-clamped)
+            divisor amplifies that channel's loss/gradient by ~1e5-1e6 and tips
+            training into NaN (see the ±5°/±30° runs). ``1e-3`` caps the amplification
+            at ~1000× while leaving the moderate-range and quad cases unchanged (their
+            variances are ≫ 1e-3).
     """
 
-    def __init__(self, w_xy: float = 1.0, w_phi: float = 1.0, balance: str = "none"):
+    def __init__(self, w_xy: float = 1.0, w_phi: float = 1.0, balance: str = "none",
+                 eps: float = 1e-3):
         super().__init__()
         assert balance in ("none", "variance"), balance
         self.w_xy = w_xy
         self.w_phi = w_phi
         self.balance = balance
+        self.eps = eps
 
     def _group(self, se: torch.Tensor, targets: torch.Tensor, lo: int, hi: int) -> torch.Tensor:
         """Mean loss over channels ``lo:hi``; fraction-of-floor when balancing."""
         if self.balance == "none":
             return se[:, lo:hi].mean()
-        eps = 1e-6
         mse_c = se[:, lo:hi].mean(dim=(0, 2))  # (g,) per-channel mean SE
         var_c = targets[:, lo:hi].var(dim=(0, 2), unbiased=False)  # (g,) mean-pred floor
-        return (mse_c / var_c.detach().clamp_min(eps)).mean()
+        return (mse_c / var_c.detach().clamp_min(self.eps)).mean()
 
     def forward(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """``outputs``/``targets``: ``(b, C, num_pairs)`` with ``C`` in {2, 4}."""

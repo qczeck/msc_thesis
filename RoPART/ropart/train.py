@@ -68,24 +68,32 @@ def parse_model_name(name: str) -> tuple[int, int]:
     return cfg["img_size"], cfg["patch_size"]
 
 
-def resolve_control(args) -> str:
-    """Resolve the control name, binding the ``quad`` control <-> quad sampler pair.
+# Controls that read exact rot90 pixels and therefore require quad angle sampling.
+# ``quad`` supervises rotation (num_channels=4); ``quad_ch2`` rotates pixels but
+# leaves rotation unsupervised (num_channels=2).
+_QUAD_CONTROLS = {"quad", "quad_ch2"}
 
-    The ``quad`` control (exact ``rot90``) and quad angle sampling are a matched
-    pair: passing either ``--control quad`` or ``--rotation-set quad`` implies the
-    other, and a conflicting combination (e.g. ``--control raw --rotation-set quad``)
-    is rejected — quad angles through a bilinear extractor, or continuous angles
-    through ``rot90``, would desync the ``(cos, sin)`` target from the rotated pixels.
-    May mutate ``args.rotation_set`` so it is recorded consistently in the checkpoint.
+
+def resolve_control(args) -> str:
+    """Resolve the control name, binding the quad controls <-> quad sampler pair.
+
+    The quad controls (exact ``rot90``) and quad angle sampling are a matched pair:
+    passing either ``--control quad``/``--control quad_ch2`` or ``--rotation-set quad``
+    implies the other, and a conflicting combination (e.g. ``--control raw
+    --rotation-set quad``) is rejected — quad angles through a bilinear extractor, or
+    continuous angles through ``rot90``, would desync the target from the rotated
+    pixels. May mutate ``args.rotation_set`` so it is recorded consistently in the
+    checkpoint.
     """
     control = args.control or ("raw" if args.rotation else "translation")
     if args.rotation_set == "quad" and args.control is None and not args.rotation:
         control = "quad"
-    if control == "quad":
+    is_quad = control in _QUAD_CONTROLS
+    if is_quad:
         args.rotation_set = "quad"
-    if (control == "quad") != (args.rotation_set == "quad"):
+    if is_quad != (args.rotation_set == "quad"):
         raise SystemExit(
-            f"--rotation-set quad pairs only with --control quad "
+            f"--rotation-set quad pairs only with a quad control {sorted(_QUAD_CONTROLS)} "
             f"(got control={control!r}, rotation-set={args.rotation_set!r})"
         )
     return control
@@ -254,8 +262,15 @@ def run_pretrain(args, device):
     elif control == "randomised":
         control_kw["sigma_max"] = args.sigma_max
     extractor, num_channels, rotates = build_extractor(control, **control_kw)
-    print(f"control={control}  num_channels={num_channels}  rotates={rotates}  "
-          f"rotation_set={args.rotation_set}  data={args.data_set}  model={args.model}")
+    # `rotates` drives pixel rotation + angle sampling in the dataset; whether
+    # rotation is *supervised* (targets carry (cos Δφ, sin Δφ)) is decided by the
+    # head width. They coincide for every control except `quad_ch2` (rotated pixels,
+    # translation-only target), which decouples the two to isolate the cause of the
+    # translation collapse in the ch=4 runs.
+    supervise_rot = num_channels >= 4
+    print(f"control={control}  num_channels={num_channels}  rotates_pixels={rotates}  "
+          f"supervise_rot={supervise_rot}  rotation_set={args.rotation_set}  "
+          f"data={args.data_set}  model={args.model}")
 
     train_ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=True)
     val_ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=False)
@@ -275,7 +290,8 @@ def run_pretrain(args, device):
     ).to(device)
     print(f"params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi, balance=args.loss_balance)
+    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi, balance=args.loss_balance,
+                            eps=args.loss_eps)
     optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr, betas=(0.9, 0.999))
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
 
@@ -302,7 +318,7 @@ def run_pretrain(args, device):
         t0 = time.time()
         train_stats = pretrain_run_epoch(
             model, train_loader, device, criterion,
-            patch_size=patch_size, rotates=rotates, optimizer=optimizer, scaler=scaler,
+            patch_size=patch_size, rotates=supervise_rot, optimizer=optimizer, scaler=scaler,
             max_norm=args.clip_grad, max_steps=args.max_steps,
         )
         # Validation is a full 10k-image sweep; running it every epoch is the main
@@ -311,7 +327,7 @@ def run_pretrain(args, device):
         do_eval = (epoch % args.eval_every == 0) or (epoch == args.epochs - 1)
         val_stats = (
             pretrain_run_epoch(model, val_loader, device, criterion,
-                               patch_size=patch_size, rotates=rotates, max_steps=args.max_steps)
+                               patch_size=patch_size, rotates=supervise_rot, max_steps=args.max_steps)
             if do_eval else None
         )
         dt = time.time() - t0
@@ -322,7 +338,7 @@ def run_pretrain(args, device):
         wb.log(log, step=epoch)
         print(f"[{epoch}] lr={lr:.2e} train_loss={train_stats['loss']:.4f} "
               + (f"val_loss={val_stats['loss']:.4f} "
-                 + (f"val_ang_err={val_stats.get('ang_err_deg', float('nan')):.1f}° " if rotates else "")
+                 + (f"val_ang_err={val_stats.get('ang_err_deg', float('nan')):.1f}° " if supervise_rot else "")
                  if val_stats is not None else "")
               + f"({dt:.0f}s)")
         save_checkpoint(out_dir / "checkpoint.pth", model, optimizer, epoch, args,
@@ -350,8 +366,10 @@ def run_overfit(args, device):
     patch_size = cfg["patch_size"]
     control = resolve_control(args)
     extractor, num_channels, rotates = build_extractor(control)
-    print(f"[overfit] control={control} num_channels={num_channels} rotates={rotates} "
-          f"rotation_set={args.rotation_set} data={args.data_set} model={args.model}")
+    supervise_rot = num_channels >= 4  # see run_pretrain: pixels rotate iff `rotates`
+    print(f"[overfit] control={control} num_channels={num_channels} rotates_pixels={rotates} "
+          f"supervise_rot={supervise_rot} rotation_set={args.rotation_set} "
+          f"data={args.data_set} model={args.model}")
 
     ds = build_pretrain_dataset(args, cfg, extractor, rotates, train=True)
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=True,
@@ -365,10 +383,11 @@ def run_overfit(args, device):
                       num_channels=num_channels, num_pairs=args.num_pairs,
                       mask_prob=args.mask_prob,
                       cross_attention_query_type=args.query_type).to(device)
-    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi, balance=args.loss_balance)
+    criterion = RelativeMSE(w_xy=args.w_xy, w_phi=args.w_phi, balance=args.loss_balance,
+                            eps=args.loss_eps)
     optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr)
 
-    targets_full = build_targets(boxes, angles if rotates else None, rotates=rotates,
+    targets_full = build_targets(boxes, angles if supervise_rot else None, rotates=supervise_rot,
                                  centered=True, normalize_by=patch_size)
     floor = (targets_full[:, 0].var(unbiased=False) + targets_full[:, 1].var(unbiased=False)).item()
     print(f"[overfit] xy floor (target to beat) ~ {floor:.3f}")
@@ -497,6 +516,11 @@ def get_args():
                         "'variance': normalise each channel by its batch target "
                         "variance so the translation and rotation groups are on a "
                         "comparable scale (proper Δφ weighting)")
+    p.add_argument("--loss-eps", default=1e-3, type=float,
+                   help="lower clamp on the per-channel variance divisor (variance "
+                        "balance only). Guards against the cos-Δφ-variance -> 0 blow-up "
+                        "at small rotation ranges that NaNs training; 1e-3 caps "
+                        "amplification at ~1000x and is inert for moderate/quad ranges")
     p.add_argument("--rotation-max-deg", default=None, type=float,
                    help="half-range for per-patch orientation in degrees; unset = "
                         "full circle [0,360). e.g. 30 samples φ in [-30°, +30°] "

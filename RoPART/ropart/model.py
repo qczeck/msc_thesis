@@ -322,6 +322,10 @@ MODEL_CONFIGS: dict[str, dict] = {
     "deit_small_patch8_32": dict(img_size=32, patch_size=8, embed_dim=384, depth=12, num_heads=6),
     "deit_small_patch16_224": dict(img_size=224, patch_size=16, embed_dim=384, depth=12, num_heads=6),
     "deit_base_patch16_224": dict(img_size=224, patch_size=16, embed_dim=768, depth=12, num_heads=12),
+    # Large-patch ViT-B for 224x224: 32px patches -> 7x7 = 49 patches (exact tiling).
+    # Bigger patches carry more orientable content (the recoverability probe) and are
+    # cheaper than P=16 (49 vs 196 patches). 24 is deliberately absent: 224 % 24 != 0.
+    "deit_base_patch32_224": dict(img_size=224, patch_size=32, embed_dim=768, depth=12, num_heads=12),
 }
 
 
@@ -362,3 +366,8 @@ def deit_small_patch16_224(**kwargs) -> RoPARTViT:
 def deit_base_patch16_224(**kwargs) -> RoPARTViT:
     """ViT-B/16 for 224x224 — the ImageNet workhorse (matches the source paper)."""
     return build_model("deit_base_patch16_224", **kwargs)
+
+
+def deit_base_patch32_224(**kwargs) -> RoPARTViT:
+    """ViT-B/32 for 224x224 — large-patch (49-patch) orientation-recoverability probe."""
+    return build_model("deit_base_patch32_224", **kwargs)

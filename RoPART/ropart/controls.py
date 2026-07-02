@@ -55,6 +55,18 @@ def _extract_quad(image, boxes, angles):
     return crop_patches_quad(image, boxes, angles)
 
 
+def _extract_quad_ch2(image, boxes, angles):
+    """Quad-rotated pixels, but rotation is *unsupervised* (translation-only target).
+
+    Identical pixel extraction to :func:`_extract_quad` (exact ``rot90``); the only
+    difference is the registered ``num_channels=2``, so the target builder emits only
+    ``(Δx, Δy)`` and no ``(cos Δφ, sin Δφ)`` channels. This isolates whether the
+    translation collapse seen in the ch=4 rotation runs is caused by the rotated
+    *input pixels* (nuisance) or by the ch=4 rotation *objective*.
+    """
+    return crop_patches_quad(image, boxes, angles)
+
+
 def _extract_supersample(image, boxes, angles, *, factor=4):
     """(c) Supersampled rotation — bicubic source upsample before the read."""
     return crop_patches_rotated(image, boxes, angles, supersample=factor)
@@ -101,6 +113,7 @@ def register_control(name: str, fn: Callable, *, rotates: bool, num_channels: in
 register_control("translation", _extract_translation, rotates=False, num_channels=2)
 register_control("raw", _extract_raw, rotates=True, num_channels=4)
 register_control("quad", _extract_quad, rotates=True, num_channels=4)
+register_control("quad_ch2", _extract_quad_ch2, rotates=True, num_channels=2)
 register_control("supersample", _extract_supersample, rotates=True, num_channels=4)
 register_control("dominant", _extract_dominant, rotates=True, num_channels=4)
 register_control("randomised", _extract_randomised, rotates=True, num_channels=4)

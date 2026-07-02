@@ -195,6 +195,62 @@ def test_quad_control_registered():
     print("OK quad control registered + runs")
 
 
+def test_quad_ch2_control_rotates_but_unsupervised():
+    """`quad_ch2` rotates pixels exactly like `quad` but emits only 2 channels.
+
+    The extractor must be pixel-identical to `quad` (exact rot90), yet its registered
+    num_channels=2 so the target builder drops the rotation channels — the run that
+    isolates whether rotated *pixels* or the ch=4 *objective* collapses translation.
+    """
+    assert "quad_ch2" in available_controls()
+    ext2, nc2, rot2 = build_extractor("quad_ch2")
+    ext4, nc4, rot4 = build_extractor("quad")
+    assert (nc2, rot2) == (2, True)
+    assert (nc4, rot4) == (4, True)
+    rng = np.random.default_rng(7)
+    img = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
+    boxes = sample_offgrid_patches(32, 8, 4, margin=0)
+    angles = sample_quad_rotations(4)
+    assert torch.equal(ext2(img, boxes, angles), ext4(img, boxes, angles))  # same pixels
+    print("OK quad_ch2 control: same rot90 pixels as quad, num_channels=2")
+
+
+def test_deit_base_patch32_224_config():
+    """Large-patch ViT-B/32 gives an exact 7x7=49-patch tiling and forwards cleanly."""
+    from ropart.model import model_config
+    from ropart.train import parse_model_name
+
+    cfg = model_config("deit_base_patch32_224")
+    assert cfg == dict(img_size=224, patch_size=32, embed_dim=768, depth=12, num_heads=12)
+    assert parse_model_name("deit_base_patch32_224") == (224, 32)
+    model = RoPARTViT(**cfg, num_channels=4, num_pairs=20, num_classes=100)
+    assert model.num_patches == 49  # (224 // 32) ** 2, exact
+    out, idx = model.forward_pretrain(torch.randn(2, 3, 224, 224))
+    assert out.shape == (2, 4, 20) and idx.shape == (2, 20)
+    print("OK deit_base_patch32_224 (49 patches, forward)")
+
+
+def test_loss_eps_guards_small_variance_blowup():
+    """A near-constant (small-angle) rotation group must not explode the balanced loss.
+
+    Mimics ±5°: cos Δφ ~ 1 with variance ~1e-5. With the default eps=1e-3 the divisor
+    is clamped, so the balanced loss stays O(1); with a tiny eps it blows up ~100x.
+    """
+    torch.manual_seed(0)
+    n = 4096
+    tgt = torch.empty(1, 4, n)
+    tgt[:, 0:2] = torch.randn(1, 2, n) * 5.0
+    phi = (torch.rand(1, n) - 0.5) * (2 * math.radians(5))   # Δφ in ~[-5°, 5°]
+    tgt[:, 2], tgt[:, 3] = torch.cos(phi), torch.sin(phi)
+    out = tgt.clone()
+    out[:, 2:] += 0.01  # small rotation error against a near-zero-variance target
+    guarded = RelativeMSE(balance="variance", eps=1e-3)(out, tgt)
+    unguarded = RelativeMSE(balance="variance", eps=1e-9)(out, tgt)
+    assert torch.isfinite(guarded) and guarded < 1.0
+    assert unguarded > 10 * guarded  # the clamp is what prevents the blow-up
+    print(f"OK loss-eps guards small-variance blow-up (eps=1e-3:{guarded:.3f} vs 1e-9:{unguarded:.1f})")
+
+
 def test_controls_registry():
     assert {"translation", "raw", "supersample", "dominant", "randomised", "matched"} <= set(available_controls())
     _, nc_t, rot_t = build_extractor("translation")
@@ -290,6 +346,9 @@ if __name__ == "__main__":
     test_quad_rotation_sampling()
     test_crop_patches_quad_is_exact_rot90()
     test_quad_control_registered()
+    test_quad_ch2_control_rotates_but_unsupervised()
+    test_deit_base_patch32_224_config()
+    test_loss_eps_guards_small_variance_blowup()
     test_controls_registry()
     test_extractors_run_on_image()
     test_eval_predict_table_orientation()
