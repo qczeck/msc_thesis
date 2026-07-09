@@ -294,6 +294,7 @@ def run_pretrain(args, device):
                             eps=args.loss_eps)
     optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr, betas=(0.9, 0.999))
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bfloat16" else torch.float16
 
     start_epoch = 0
     resumed_id = None
@@ -319,7 +320,7 @@ def run_pretrain(args, device):
         train_stats = pretrain_run_epoch(
             model, train_loader, device, criterion,
             patch_size=patch_size, rotates=supervise_rot, optimizer=optimizer, scaler=scaler,
-            max_norm=args.clip_grad, max_steps=args.max_steps,
+            amp_dtype=amp_dtype, max_norm=args.clip_grad, max_steps=args.max_steps,
         )
         # Validation is a full 10k-image sweep; running it every epoch is the main
         # source of the epoch-boundary GPU-utilisation dip. Gate it behind
@@ -327,7 +328,8 @@ def run_pretrain(args, device):
         do_eval = (epoch % args.eval_every == 0) or (epoch == args.epochs - 1)
         val_stats = (
             pretrain_run_epoch(model, val_loader, device, criterion,
-                               patch_size=patch_size, rotates=supervise_rot, max_steps=args.max_steps)
+                               patch_size=patch_size, rotates=supervise_rot,
+                               amp_dtype=amp_dtype, max_steps=args.max_steps)
             if do_eval else None
         )
         dt = time.time() - t0
@@ -450,6 +452,7 @@ def run_linear_probe(args, device):
 
     optimizer = torch.optim.AdamW(model.clf.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bfloat16" else torch.float16
     wb = WandbRun(args, vars(args))
 
     best = 0.0
@@ -458,8 +461,10 @@ def run_linear_probe(args, device):
         for g in optimizer.param_groups:
             g["lr"] = lr
         train_stats = cls_run_epoch(model, train_loader, device, optimizer=optimizer,
-                                    scaler=scaler, eval_features=True, max_steps=args.max_steps)
-        val_stats = cls_run_epoch(model, val_loader, device, max_steps=args.max_steps)
+                                    scaler=scaler, amp_dtype=amp_dtype, eval_features=True,
+                                    max_steps=args.max_steps)
+        val_stats = cls_run_epoch(model, val_loader, device, amp_dtype=amp_dtype,
+                                  max_steps=args.max_steps)
         best = max(best, val_stats["acc1"])
         wb.log({"epoch": epoch, "lr": lr,
                 **{f"probe_train/{k}": v for k, v in train_stats.items()},
@@ -500,6 +505,11 @@ def get_args():
     p.add_argument("--weight-decay", default=0.05, type=float)
     p.add_argument("--clip-grad", default=None, type=float)
     p.add_argument("--drop-path", default=0.0, type=float)
+    p.add_argument("--amp-dtype", default="float16", choices=["float16", "bfloat16"],
+                   help="CUDA autocast dtype. 'float16' (default) keeps existing runs "
+                        "byte-identical; 'bfloat16' has fp32 exponent range so ViT-B "
+                        "attention logits do not overflow to inf/NaN (fixes the quad "
+                        "P=32 crash). No-op off CUDA.")
     # pretext
     p.add_argument("--control", default=None, choices=available_controls(),
                    help="patch-extraction control; default translation (or raw if --rotation)")

@@ -35,9 +35,9 @@ class _Meters:
         return {k: self._sum[k] / self._n[k] for k in self._sum}
 
 
-def _amp_ctx(device: torch.device, enabled: bool):
+def _amp_ctx(device: torch.device, enabled: bool, dtype: torch.dtype = torch.float16):
     if device.type == "cuda" and enabled:
-        return torch.autocast(device_type="cuda")
+        return torch.autocast(device_type="cuda", dtype=dtype)
     return nullcontext()
 
 
@@ -51,6 +51,7 @@ def pretrain_run_epoch(
     rotates: bool,
     optimizer=None,
     scaler=None,
+    amp_dtype: torch.dtype = torch.float16,
     max_norm: float | None = None,
     max_steps: int | None = None,
 ) -> dict[str, float]:
@@ -69,7 +70,7 @@ def pretrain_run_epoch(
             angles = angles.to(device, non_blocking=True)
             bs = packed.shape[0]
 
-            with _amp_ctx(device, scaler is not None):
+            with _amp_ctx(device, scaler is not None, amp_dtype):
                 outputs, indices = model.forward_pretrain(packed)
                 targets = build_targets(
                     boxes, angles if rotates else None,
@@ -128,6 +129,7 @@ def cls_run_epoch(
     *,
     optimizer=None,
     scaler=None,
+    amp_dtype: torch.dtype = torch.float16,
     eval_features: bool = False,
     max_steps: int | None = None,
 ) -> dict[str, float]:
@@ -148,7 +150,7 @@ def cls_run_epoch(
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             bs = images.shape[0]
-            with _amp_ctx(device, scaler is not None):
+            with _amp_ctx(device, scaler is not None, amp_dtype):
                 logits = model.forward_classify(images)
                 loss = F.cross_entropy(logits, labels)
             if train:
