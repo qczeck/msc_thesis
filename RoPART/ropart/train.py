@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ropart.controls import available_controls, build_extractor
+from ropart.controls import available_controls, build_extractor, control_kwargs
 from ropart.data import (
     RoPARTCIFAR,
     RoPARTImageFolder,
@@ -254,14 +254,8 @@ def run_pretrain(args, device):
     patch_size = cfg["patch_size"]
 
     control = resolve_control(args)
-    control_kw = {}
-    if control == "supersample":
-        control_kw["factor"] = args.supersample
-    elif control == "dominant":
-        control_kw["sigma"] = args.sigma_lp
-    elif control == "randomised":
-        control_kw["sigma_max"] = args.sigma_max
-    extractor, num_channels, rotates = build_extractor(control, **control_kw)
+    extractor, num_channels, rotates = build_extractor(
+        control, **control_kwargs(control, vars(args)))
     # `rotates` drives pixel rotation + angle sampling in the dataset; whether
     # rotation is *supervised* (targets carry (cos Δφ, sin Δφ)) is decided by the
     # head width. They coincide for every control except `quad_ch2` (rotated pixels,
@@ -367,7 +361,8 @@ def run_overfit(args, device):
     cfg = model_config(args.model)
     patch_size = cfg["patch_size"]
     control = resolve_control(args)
-    extractor, num_channels, rotates = build_extractor(control)
+    extractor, num_channels, rotates = build_extractor(
+        control, **control_kwargs(control, vars(args)))
     supervise_rot = num_channels >= 4  # see run_pretrain: pixels rotate iff `rotates`
     print(f"[overfit] control={control} num_channels={num_channels} rotates_pixels={rotates} "
           f"supervise_rot={supervise_rot} rotation_set={args.rotation_set} "

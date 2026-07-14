@@ -124,6 +124,27 @@ def available_controls() -> list[str]:
     return sorted(_REGISTRY)
 
 
+# CLI/checkpoint option name (+ default) for each extractor kwarg a control takes.
+# The single source of truth shared by training (live argparse args) and eval
+# (the ``args`` dict stored in a checkpoint), so the two can never drift.
+_CONTROL_KWARG_SPECS: dict[str, dict[str, tuple[str, float]]] = {
+    "supersample": {"factor": ("supersample", 4)},
+    "dominant": {"sigma": ("sigma_lp", 1.0)},
+    "randomised": {"sigma_max": ("sigma_max", 0.8)},
+}
+
+
+def control_kwargs(name: str, opts) -> dict:
+    """Extractor kwargs for the named control, read from argparse-style options.
+
+    ``opts`` is any mapping (e.g. ``vars(args)`` at train time, or the ``args``
+    dict recovered from a checkpoint at eval time); missing keys fall back to the
+    CLI defaults so old checkpoints reconstruct the extractor they trained with.
+    """
+    spec = _CONTROL_KWARG_SPECS.get(name, {})
+    return {kw: opts.get(opt, default) for kw, (opt, default) in spec.items()}
+
+
 def build_extractor(name: str, **kwargs) -> tuple[Extractor, int, bool]:
     """Return ``(extractor, num_channels, rotates)`` for the named control.
 

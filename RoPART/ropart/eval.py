@@ -38,11 +38,11 @@ from pathlib import Path
 
 import torch
 
-from ropart.controls import build_extractor
-from ropart.data import RoPARTCIFAR
+from ropart.controls import build_extractor, control_kwargs
+from ropart.data import RoPARTCIFAR, RoPARTImageFolder
 from ropart.model import RoPARTViT
 from ropart.targets import build_targets
-from ropart.train import parse_model_name, pick_device, set_seed
+from ropart.train import parse_model_name, pick_device, resolve_control, set_seed
 
 
 # --------------------------------------------------------------------------- #
@@ -98,21 +98,42 @@ def load_model(ckpt: dict, device: torch.device) -> tuple[RoPARTViT, int, int]:
     return model, img_size, patch_size
 
 
-def build_val_loader(ckpt: dict, args, device) -> tuple[torch.utils.data.DataLoader, bool]:
-    """Val loader matching the checkpoint's control (so the targets are built the
-    same way it trained). Returns ``(loader, rotates)``."""
+def build_val_loader(
+    ckpt: dict, args, device
+) -> tuple[torch.utils.data.DataLoader, bool, str]:
+    """Val loader matching the checkpoint's dataset, control and angle
+    distribution (so the targets are built exactly the way it trained — a bounded
+    checkpoint must be scored against bounded Δφ floors, and a quad checkpoint
+    must get quad angles or ``crop_patches_quad`` desyncs pixels from targets).
+    Returns ``(loader, rotates, angle_set)``."""
     ckpt_args = ckpt.get("args", {})
-    control = ckpt_args.get("control") or ("raw" if ckpt_args.get("rotation") else "translation")
-    extractor, _, rotates = build_extractor(control)
+    # resolve_control on a namespace rebuilt from the stored args — same binding
+    # of the quad controls <-> quad sampler as at train time.
+    ns = argparse.Namespace(
+        control=ckpt_args.get("control"),
+        rotation=ckpt_args.get("rotation", False),
+        rotation_set=ckpt_args.get("rotation_set", "continuous"),
+    )
+    control = resolve_control(ns)
+    extractor, _, rotates = build_extractor(control, **control_kwargs(control, ckpt_args))
     img_size, patch_size = parse_model_name(ckpt_args.get("model", "deit_small_patch4_32"))
-    ds = RoPARTCIFAR(args.data_path, extractor=extractor, rotates=rotates,
-                     img_size=img_size, patch_size=patch_size, train=False)
+    max_deg = ckpt_args.get("rotation_max_deg")
+    common = dict(
+        extractor=extractor, rotates=rotates,
+        img_size=img_size, patch_size=patch_size, train=False,
+        max_angle=math.radians(max_deg) if max_deg is not None else None,
+        angle_set=ns.rotation_set,
+    )
+    if ckpt_args.get("data_set") == "IMAGENET":
+        ds = RoPARTImageFolder(args.data_path, **common)
+    else:
+        ds = RoPARTCIFAR(args.data_path, **common)
     kw = {"num_workers": args.num_workers, "pin_memory": device.type == "cuda"}
     if args.num_workers > 0:
         kw["persistent_workers"] = True
         kw["prefetch_factor"] = 4
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=False, **kw)
-    return loader, rotates
+    return loader, rotates, ns.rotation_set
 
 
 # --------------------------------------------------------------------------- #
@@ -147,7 +168,7 @@ def predict_table(model: RoPARTViT, x: torch.Tensor) -> torch.Tensor:
 
 
 def _accumulate(pred: torch.Tensor, tgt: torch.Tensor, rotates: bool,
-                acc: _SqAcc, *, n_triples: int):
+                acc: _SqAcc, *, n_triples: int, quad: bool = False):
     """Fold one batch's dense ``(b, C, N, N)`` pred/target tables into ``acc``."""
     b, c, n, _ = pred.shape
     eye = torch.eye(n, dtype=torch.bool, device=pred.device)
@@ -164,6 +185,19 @@ def _accumulate(pred: torch.Tensor, tgt: torch.Tensor, rotates: bool,
     # squared translation error per pair (for euclidean RMSE in pixels)
     se_xy = ((pred[:, 0:2] - tgt[:, 0:2]) ** 2).sum(dim=1)[:, off]  # (b, n_off)
     acc.add("se_xy", se_xy.sum().item(), se_xy.numel())
+
+    # --- (1b) per-pair angular error (matches train's val ang_err_deg) -------- #
+    if rotates and c >= 4:
+        a_pred = torch.atan2(pred[:, 3], pred[:, 2])[:, off]
+        a_tgt = torch.atan2(tgt[:, 3], tgt[:, 2])[:, off]
+        d_ang = (a_pred - a_tgt + math.pi) % (2 * math.pi) - math.pi
+        acc.add("ang_absdeg", (d_ang.abs() * 180.0 / math.pi).sum().item(), d_ang.numel())
+        # target-angle mean-|Δφ| floor: MAE of predicting Δφ = 0 for every pair
+        acc.add("ang_floor_absdeg", (a_tgt.abs() * 180.0 / math.pi).sum().item(), a_tgt.numel())
+        if quad:
+            # fraction of pairs whose predicted angle rounds to the correct cardinal
+            correct = d_ang.abs() < (math.pi / 4)
+            acc.add("quad_correct", correct.float().sum().item(), correct.numel())
 
     # --- (2) identity / diagonal: pred at (i, i) ----------------------------- #
     diag_xy = pred[:, 0:2][:, :, eye]  # (b, 2, N)
@@ -209,7 +243,8 @@ def _accumulate(pred: torch.Tensor, tgt: torch.Tensor, rotates: bool,
             acc.add("comp_rot_absdeg", (d.abs() * 180.0 / math.pi).sum().item(), d.numel())
 
 
-def report(acc: _SqAcc, rotates: bool, patch_size: int) -> dict:
+def report(acc: _SqAcc, rotates: bool, patch_size: int, img_size: int,
+           quad: bool = False) -> dict:
     """Turn the accumulators into the final metrics dict (+ pretty print)."""
     floor_x = acc.mean("tsq_x") - (acc._sq["tsum_x"] / acc._n["tsum_x"]) ** 2
     floor_y = acc.mean("tsq_y") - (acc._sq["tsum_y"] / acc._n["tsum_y"]) ** 2
@@ -225,14 +260,22 @@ def report(acc: _SqAcc, rotates: bool, patch_size: int) -> dict:
         "comp_xy_ratio": acc.ratio_rms("comp_xy_res", "comp_xy_sig"),
     }
     if rotates:
+        m["ang_err_deg"] = acc.mean("ang_absdeg")
+        m["ang_floor_deg"] = acc.mean("ang_floor_absdeg")
         m["identity_rot_rmse"] = acc.rms("diag_rot")
         m["neg_sym_rot_ratio"] = acc.ratio_rms("sym_rot_res", "sym_rot_sig")
         m["comp_rot_mae_deg"] = acc.mean("comp_rot_absdeg")
+        if quad:
+            m["quad_acc"] = acc.mean("quad_correct")
 
     print("\n=== RoPART intrinsic correctness (val, all ordered pairs) ===")
     print(f"(1) floor    mse_x={mse_x:.4f} / floor_x={floor_x:.4f}  ({m['mse_x_vs_floor']:.2%} of floor)")
     print(f"             mse_y={mse_y:.4f} / floor_y={floor_y:.4f}  ({m['mse_y_vs_floor']:.2%} of floor)")
-    print(f"             translation RMSE = {rmse_px:.3f} px (image is {patch_size * (32 // patch_size)} px)")
+    print(f"             translation RMSE = {rmse_px:.3f} px (image is {img_size} px)")
+    if rotates:
+        print(f"             angular MAE = {m['ang_err_deg']:.2f}° / floor = {m['ang_floor_deg']:.2f}°")
+        if quad:
+            print(f"             quad accuracy = {m['quad_acc']:.2%}  (chance = 25%)")
     print(f"(2) identity translation RMSE at (i,i) = {m['identity_rmse_px']:.3f} px  (want ~0)")
     if rotates:
         print(f"             rotation (cos,sin) RMSE at (i,i) = {m['identity_rot_rmse']:.4f}  (want ~0)")
@@ -255,8 +298,14 @@ def report(acc: _SqAcc, rotates: bool, patch_size: int) -> dict:
 def run(args, device):
     ckpt = torch.load(args.resume, map_location="cpu")
     model, img_size, patch_size = load_model(ckpt, device)
-    loader, rotates = build_val_loader(ckpt, args, device)
-    print(f"checkpoint epoch={ckpt.get('epoch')}  rotates={rotates}  "
+    loader, rotates, angle_set = build_val_loader(ckpt, args, device)
+    # Pixels rotate iff `rotates`; rotation is *supervised* (targets carry
+    # (cos Δφ, sin Δφ), rotation metrics apply) iff the head is >= 4 wide —
+    # they differ only for quad_ch2 (see train.run_pretrain).
+    supervise_rot = rotates and model.num_channels >= 4
+    quad = supervise_rot and angle_set == "quad"
+    print(f"checkpoint epoch={ckpt.get('epoch')}  rotates_pixels={rotates}  "
+          f"supervise_rot={supervise_rot}  angle_set={angle_set}  "
           f"num_channels={model.num_channels}  query={model.head.query_type}")
 
     acc = _SqAcc()
@@ -267,13 +316,15 @@ def run(args, device):
         boxes = boxes.to(device, non_blocking=True)
         angles = angles.to(device, non_blocking=True)
         pred = predict_table(model, packed)
-        tgt = build_targets(boxes, angles if rotates else None,
-                            rotates=rotates, centered=True, normalize_by=patch_size)
-        _accumulate(pred, tgt, rotates, acc, n_triples=args.num_triples)
+        tgt = build_targets(boxes, angles if supervise_rot else None,
+                            rotates=supervise_rot, centered=True, normalize_by=patch_size)
+        _accumulate(pred, tgt, supervise_rot, acc, n_triples=args.num_triples, quad=quad)
 
-    metrics = report(acc, rotates, patch_size)
+    metrics = report(acc, supervise_rot, patch_size, img_size, quad=quad)
     out_path = Path(args.resume).with_name("eval_intrinsic.json")
-    out_path.write_text(json.dumps({"epoch": ckpt.get("epoch"), "rotates": rotates, **metrics}, indent=2))
+    out_path.write_text(json.dumps({"epoch": ckpt.get("epoch"), "rotates": rotates,
+                                    "supervise_rot": supervise_rot,
+                                    "angle_set": angle_set, **metrics}, indent=2))
     print(f"wrote {out_path}")
 
 
