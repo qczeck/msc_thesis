@@ -40,7 +40,7 @@ import torch
 
 from ropart.controls import build_extractor, control_kwargs
 from ropart.data import RoPARTCIFAR, RoPARTImageFolder
-from ropart.model import RoPARTViT
+from ropart.model import RoPARTViT, model_config
 from ropart.targets import build_targets
 from ropart.train import parse_model_name, pick_device, resolve_control, set_seed
 
@@ -80,16 +80,19 @@ def load_model(ckpt: dict, device: torch.device) -> tuple[RoPARTViT, int, int]:
     """Rebuild the encoder + relative head exactly as the checkpoint expects.
 
     Returns ``(model, img_size, patch_size)``. ``num_channels`` is read from the
-    saved head weight (authoritative even if ``args`` is incomplete).
+    saved head weight (authoritative even if ``args`` is incomplete). The full
+    architecture config (embed_dim/depth/num_heads, not just the geometry) comes
+    from ``model_config`` — ViT-B checkpoints are 768-wide, not the ViT-S default.
     """
     ckpt_args = ckpt.get("args", {})
-    img_size, patch_size = parse_model_name(ckpt_args.get("model", "deit_small_patch4_32"))
+    cfg = model_config(ckpt_args.get("model", "deit_small_patch4_32"))
+    img_size, patch_size = cfg["img_size"], cfg["patch_size"]
     head_w = ckpt["model"].get("head.output_project.weight")
     num_channels = head_w.shape[0] if head_w is not None else ckpt_args.get("num_channels", 2)
     query_type = ckpt_args.get("query_type", "patch_cat")
 
     model = RoPARTViT(
-        img_size=img_size, patch_size=patch_size, num_classes=100,
+        **cfg, num_classes=100,
         num_channels=num_channels, num_pairs=ckpt_args.get("num_pairs", 64),
         mask_prob=0.0, cross_attention_query_type=query_type,
     ).to(device)
