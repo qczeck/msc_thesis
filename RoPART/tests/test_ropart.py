@@ -215,6 +215,32 @@ def test_quad_ch2_control_rotates_but_unsupervised():
     print("OK quad_ch2 control: same rot90 pixels as quad, num_channels=2")
 
 
+def test_ss_ch2_control_rotates_but_unsupervised():
+    """`ss_ch2` extracts pixels exactly like `supersample` but emits only 2 channels.
+
+    The continuous analogue of `quad_ch2`: same supersampled rotated read at the
+    same factor, but num_channels=2 so rotation is unsupervised — the run that
+    isolates whether ss *pixels* or the ch=4 rotation *objective* collapsed
+    translation in the P=32 supersample run.
+    """
+    from ropart.controls import control_kwargs
+
+    assert "ss_ch2" in available_controls()
+    opts = {"supersample": 4}
+    ext2, nc2, rot2 = build_extractor("ss_ch2", **control_kwargs("ss_ch2", opts))
+    ext4, nc4, rot4 = build_extractor("supersample", **control_kwargs("supersample", opts))
+    assert (nc2, rot2) == (2, True)
+    assert (nc4, rot4) == (4, True)
+    # the factor kwarg is picked up from the same CLI option as `supersample`
+    assert control_kwargs("ss_ch2", {}) == {"factor": 4}
+    rng = np.random.default_rng(11)
+    img = rng.integers(0, 256, size=(32, 32, 3), dtype=np.uint8)
+    boxes = sample_offgrid_patches(32, 8, 4, margin=rotation_margin(8))
+    angles = sample_rotation_angles(4, generator=torch.Generator().manual_seed(3))
+    assert torch.equal(ext2(img, boxes, angles), ext4(img, boxes, angles))  # same pixels
+    print("OK ss_ch2 control: same supersampled pixels as supersample, num_channels=2")
+
+
 def test_deit_base_patch32_224_config():
     """Large-patch ViT-B/32 gives an exact 7x7=49-patch tiling and forwards cleanly."""
     from ropart.model import model_config
@@ -324,7 +350,7 @@ def test_eval_metrics_oracle():
 
     acc = _SqAcc()
     _accumulate(tgt.clone(), tgt, rotates=True, acc=acc, n_triples=2048)
-    m = report(acc, rotates=True, patch_size=ps)
+    m = report(acc, rotates=True, patch_size=ps, img_size=32)
 
     assert m["mse_x_vs_floor"] < 1e-6 and m["mse_y_vs_floor"] < 1e-6
     assert m["trans_rmse_px"] < 1e-3
@@ -347,6 +373,7 @@ if __name__ == "__main__":
     test_crop_patches_quad_is_exact_rot90()
     test_quad_control_registered()
     test_quad_ch2_control_rotates_but_unsupervised()
+    test_ss_ch2_control_rotates_but_unsupervised()
     test_deit_base_patch32_224_config()
     test_loss_eps_guards_small_variance_blowup()
     test_controls_registry()

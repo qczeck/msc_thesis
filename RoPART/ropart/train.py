@@ -258,9 +258,9 @@ def run_pretrain(args, device):
         control, **control_kwargs(control, vars(args)))
     # `rotates` drives pixel rotation + angle sampling in the dataset; whether
     # rotation is *supervised* (targets carry (cos Δφ, sin Δφ)) is decided by the
-    # head width. They coincide for every control except `quad_ch2` (rotated pixels,
-    # translation-only target), which decouples the two to isolate the cause of the
-    # translation collapse in the ch=4 runs.
+    # head width. They coincide for every control except the ch2 pair `quad_ch2` /
+    # `ss_ch2` (rotated pixels, translation-only target), which decouple the two to
+    # isolate the cause of the translation collapse in the ch=4 runs.
     supervise_rot = num_channels >= 4
     print(f"control={control}  num_channels={num_channels}  rotates_pixels={rotates}  "
           f"supervise_rot={supervise_rot}  rotation_set={args.rotation_set}  "

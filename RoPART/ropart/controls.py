@@ -72,6 +72,19 @@ def _extract_supersample(image, boxes, angles, *, factor=4):
     return crop_patches_rotated(image, boxes, angles, supersample=factor)
 
 
+def _extract_ss_ch2(image, boxes, angles, *, factor=4):
+    """Supersampled rotated pixels, but rotation is *unsupervised* (ch=2 target).
+
+    The continuous analogue of :func:`_extract_quad_ch2`: identical pixel
+    extraction to :func:`_extract_supersample`, but the registered
+    ``num_channels=2`` means the target builder emits only ``(Δx, Δy)``. This
+    isolates whether the supersample run's translation collapse was caused by
+    the ss *pixels* (nuisance input) or by the unlearnable ch=4 rotation
+    *objective* dragging the shared encoder.
+    """
+    return crop_patches_rotated(image, boxes, angles, supersample=factor)
+
+
 def _extract_dominant(image, boxes, angles, *, sigma=1.0):
     """(d) Dominant isotropic low-pass — one heavy blur on every rotated patch."""
     return gaussian_blur_patches(crop_patches_rotated(image, boxes, angles), sigma)
@@ -115,6 +128,7 @@ register_control("raw", _extract_raw, rotates=True, num_channels=4)
 register_control("quad", _extract_quad, rotates=True, num_channels=4)
 register_control("quad_ch2", _extract_quad_ch2, rotates=True, num_channels=2)
 register_control("supersample", _extract_supersample, rotates=True, num_channels=4)
+register_control("ss_ch2", _extract_ss_ch2, rotates=True, num_channels=2)
 register_control("dominant", _extract_dominant, rotates=True, num_channels=4)
 register_control("randomised", _extract_randomised, rotates=True, num_channels=4)
 register_control("matched", _extract_matched, rotates=True, num_channels=4)
@@ -129,6 +143,7 @@ def available_controls() -> list[str]:
 # (the ``args`` dict stored in a checkpoint), so the two can never drift.
 _CONTROL_KWARG_SPECS: dict[str, dict[str, tuple[str, float]]] = {
     "supersample": {"factor": ("supersample", 4)},
+    "ss_ch2": {"factor": ("supersample", 4)},
     "dominant": {"sigma": ("sigma_lp", 1.0)},
     "randomised": {"sigma_max": ("sigma_max", 0.8)},
 }
