@@ -555,6 +555,15 @@ def get_args():
 def main():
     args = get_args()
     set_seed(args.seed)
+    # DataLoader worker IPC: switch off torch's default ``file_descriptor`` sharing
+    # strategy, whose immediate-unlink-of-the-shm-file dance races and fails under
+    # /dev/shm pressure when several worker-heavy jobs share a node — the observed
+    # ``could not unlink the shared memory file /torch_… : No such file or directory``
+    # crash (job 264033, epoch 33/100). ``file_system`` transports worker tensors via
+    # persistent named files instead, so it is resilient to that race. Numerics-neutral:
+    # only the IPC transport changes, tensor contents/RNG/model are byte-identical.
+    if args.num_workers > 0 and "file_system" in torch.multiprocessing.get_all_sharing_strategies():
+        torch.multiprocessing.set_sharing_strategy("file_system")
     device = pick_device(args.device)
     print(f"device: {device}")
     if args.overfit_steps > 0:
