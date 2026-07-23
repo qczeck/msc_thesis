@@ -302,6 +302,7 @@ def crop_patches_rotated(
     img = _image_to_chw_float(image)  # (C, H, W)
     h0, w0 = img.shape[-2], img.shape[-1]
     angles_l = angles.float().tolist()
+    boxes_l = boxes.T.tolist()
 
     # Upsample the shared full image once (control (c)). We normalise grid
     # coordinates against the ORIGINAL extent and rely on align_corners=True so the
@@ -312,8 +313,21 @@ def crop_patches_rotated(
             img[None], scale_factor=supersample, mode="bicubic", align_corners=True
         ).clamp_(0.0, 1.0)[0]
 
+    # Fast path: when every patch reads the SAME source (``fill_corners``) and is the
+    # same size (the RoPART sampling invariant — constant ``patch_size``), the whole
+    # batch of rotated reads is one ``grid_sample`` instead of ``N`` in a Python loop.
+    # This is a pure performance refactor: the arithmetic and the ``grid_sample`` call
+    # are bit-identical to the loop below (verified by
+    # ``test_crop_patches_rotated_batched_equals_loop``). The upsample above is the
+    # dominant cost and is untouched, so the win is ~10% — the loop's dispatch overhead.
+    same_size = boxes_l and all((b[2] - b[0]) == (b[3] - b[1]) == (boxes_l[0][2] - boxes_l[0][0]) for b in boxes_l)
+    if fill_corners and same_size:
+        return _crop_rotated_batched(
+            full_src, boxes_l, angles_l, w0, h0, interpolation, padding_mode
+        )
+
     patches = []
-    for (x_s, y_s, x_e, y_e), phi in zip(boxes.T.tolist(), angles_l):
+    for (x_s, y_s, x_e, y_e), phi in zip(boxes_l, angles_l):
         ps = x_e - x_s
         cos, sin = math.cos(phi), math.sin(phi)
 
@@ -352,6 +366,54 @@ def crop_patches_rotated(
         )[0]
         patches.append(patch)
     return torch.stack(patches, dim=0)  # (N, C, ps, ps)
+
+
+def _crop_rotated_batched(
+    full_src: torch.Tensor,
+    boxes_l: list[list[int]],
+    angles_l: list[float],
+    w0: int,
+    h0: int,
+    interpolation: str,
+    padding_mode: str,
+) -> torch.Tensor:
+    """Batched shared-source rotated read — the fast path of :func:`crop_patches_rotated`.
+
+    Assumes every box is the same ``ps x ps`` size and reads the one shared
+    ``full_src`` (the ``fill_corners`` case). Builds all ``N`` sampling grids at once
+    and issues a **single** ``grid_sample`` by stacking the grids along the output
+    height (source batch stays 1, so the — possibly upsampled — ``full_src`` is never
+    materialised ``N`` times). The per-pixel arithmetic mirrors the loop exactly:
+    Python-float ``cos/sin/cx/cy`` become ``float32`` tensors, and
+    ``python_float * float32_tensor`` is computed in ``float32`` either way, so the
+    result is bit-identical (see the equality test).
+    """
+    c = full_src.shape[0]
+    n = len(boxes_l)
+    ps = boxes_l[0][2] - boxes_l[0][0]
+
+    # patch-local pixel-centre coordinates, shared across all patches (constant size)
+    idx = torch.arange(ps, dtype=torch.float32) - (ps - 1) / 2.0
+    ly, lx = torch.meshgrid(idx, idx, indexing="ij")  # (ps, ps)
+
+    cos = torch.tensor([math.cos(a) for a in angles_l], dtype=torch.float32).view(n, 1, 1)
+    sin = torch.tensor([math.sin(a) for a in angles_l], dtype=torch.float32).view(n, 1, 1)
+    # pixel-index centre (matches the loop's (x_s + x_e - 1) / 2 — keeps axis-aligned
+    # angles interpolation-free under align_corners=True).
+    cx = torch.tensor([(b[0] + b[2] - 1) / 2.0 for b in boxes_l], dtype=torch.float32).view(n, 1, 1)
+    cy = torch.tensor([(b[1] + b[3] - 1) / 2.0 for b in boxes_l], dtype=torch.float32).view(n, 1, 1)
+
+    sx = cx + cos * lx - sin * ly  # (n, ps, ps)
+    sy = cy + sin * lx + cos * ly
+
+    gx = sx / ((w0 - 1) / 2.0) - 1.0
+    gy = sy / ((h0 - 1) / 2.0) - 1.0
+    grid = torch.stack((gx, gy), dim=-1).reshape(1, n * ps, ps, 2)  # batch-along-height
+
+    out = F.grid_sample(
+        full_src[None], grid, mode=interpolation, padding_mode=padding_mode, align_corners=True
+    )  # (1, C, n*ps, ps)
+    return out.reshape(c, n, ps, ps).permute(1, 0, 2, 3).contiguous()  # (n, C, ps, ps)
 
 
 def crop_patches_quad(

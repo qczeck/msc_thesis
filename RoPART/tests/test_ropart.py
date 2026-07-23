@@ -15,6 +15,7 @@ from helpers.sampling import (
     rotation_margin,
     crop_patches,
     crop_patches_quad,
+    crop_patches_rotated,
 )
 from helpers.targets import (
     relative_translation,
@@ -180,6 +181,65 @@ def test_crop_patches_quad_is_exact_rot90():
         expect = torch.rot90(base, k, dims=(-2, -1))
         assert torch.equal(out, expect), f"k={k} not an exact rot90"
     print("OK crop_patches_quad exact rot90")
+
+
+def _crop_rotated_reference_loop(image, boxes, angles, *, supersample):
+    """Pre-optimisation per-patch loop for the fill_corners path — the comparability
+    oracle for :func:`crop_patches_rotated`'s batched fast path. Kept verbatim here so
+    the test pins the batched output to the exact pixels the top run (264032) trained
+    on; if the fast path ever drifts, ``torch.equal`` below fails.
+    """
+    import torch.nn.functional as F
+    from helpers.sampling import _image_to_chw_float
+
+    img = _image_to_chw_float(image)
+    h0, w0 = img.shape[-2], img.shape[-1]
+    full_src = img
+    if supersample > 1:
+        full_src = F.interpolate(
+            img[None], scale_factor=supersample, mode="bicubic", align_corners=True
+        ).clamp_(0.0, 1.0)[0]
+    patches = []
+    for (x_s, y_s, x_e, y_e), phi in zip(boxes.T.tolist(), angles.float().tolist()):
+        ps = x_e - x_s
+        cos, sin = math.cos(phi), math.sin(phi)
+        idx = torch.arange(ps, dtype=torch.float32) - (ps - 1) / 2.0
+        ly, lx = torch.meshgrid(idx, idx, indexing="ij")
+        cx = (x_s + x_e - 1) / 2.0
+        cy = (y_s + y_e - 1) / 2.0
+        sx = cx + cos * lx - sin * ly
+        sy = cy + sin * lx + cos * ly
+        gx = sx / ((w0 - 1) / 2.0) - 1.0
+        gy = sy / ((h0 - 1) / 2.0) - 1.0
+        grid = torch.stack((gx, gy), dim=-1)[None]
+        patch = F.grid_sample(
+            full_src[None], grid, mode="bilinear", padding_mode="zeros", align_corners=True
+        )[0]
+        patches.append(patch)
+    return torch.stack(patches, dim=0)
+
+
+def test_crop_patches_rotated_batched_equals_loop():
+    """The batched fast path is BIT-IDENTICAL to the pre-optimisation per-patch loop.
+
+    This is the comparability guarantee for the supersample speedup: the ±60/±90
+    ss-wphi01 runs must ingest the exact pixels the ±30 top run (264032) did.
+    Checked at run geometry (P=32, img=224, ss=4) across seeds and the full bounded
+    range up to ±90°.
+    """
+    IMG, P, SS = 224, 32, 4
+    n = (IMG // P) ** 2  # 49
+    for seed in range(6):
+        gen = torch.Generator().manual_seed(seed)
+        rng = np.random.default_rng(seed)
+        image = rng.integers(0, 256, size=(IMG, IMG, 3), dtype=np.uint8)
+        boxes = sample_offgrid_patches(IMG, P, n, margin=rotation_margin(P), generator=gen)
+        angles = sample_rotation_angles(n, low=-math.pi / 2, high=math.pi / 2, generator=gen)
+        fast = crop_patches_rotated(image, boxes, angles, supersample=SS)
+        ref = _crop_rotated_reference_loop(image, boxes, angles, supersample=SS)
+        assert fast.shape == ref.shape == (n, 3, P, P)
+        assert torch.equal(fast, ref), f"seed={seed}: batched path drifted from the loop"
+    print("OK crop_patches_rotated batched fast path == loop (bit-identical, ss=4, ±90°)")
 
 
 def test_quad_control_registered():
@@ -371,6 +431,7 @@ if __name__ == "__main__":
     test_bounded_rotation_sampling()
     test_quad_rotation_sampling()
     test_crop_patches_quad_is_exact_rot90()
+    test_crop_patches_rotated_batched_equals_loop()
     test_quad_control_registered()
     test_quad_ch2_control_rotates_but_unsupervised()
     test_ss_ch2_control_rotates_but_unsupervised()
