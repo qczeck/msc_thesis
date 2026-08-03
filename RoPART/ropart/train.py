@@ -339,6 +339,12 @@ def run_pretrain(args, device):
               + f"({dt:.0f}s)")
         save_checkpoint(out_dir / "checkpoint.pth", model, optimizer, epoch, args,
                         extra={"wandb_id": args.wandb_id})
+        # Permanent snapshot alongside the rolling checkpoint: the rolling one is
+        # overwritten every epoch, so intermediate weights are otherwise lost and
+        # convergence questions become unanswerable once the run has finished.
+        if args.save_every and (epoch + 1) % args.save_every == 0:
+            save_checkpoint(out_dir / f"checkpoint_ep{epoch:04d}.pth", model, optimizer,
+                            epoch, args, extra={"wandb_id": args.wandb_id})
 
     wb.finish()
 
@@ -492,6 +498,12 @@ def get_args():
     p.add_argument("--max-steps", default=None, type=int, help="cap steps/epoch (smoke/diagnostics)")
     p.add_argument("--eval-every", default=1, type=int,
                    help="run validation every N epochs (and the last); higher = less epoch-boundary GPU idle")
+    p.add_argument("--save-every", default=0, type=int,
+                   help="additionally keep a permanent checkpoint_ep<NNNN>.pth every N epochs "
+                        "(0=off). checkpoint.pth is overwritten every epoch, so without this no "
+                        "intermediate weights survive and 'how did metric X evolve over training?' "
+                        "cannot be answered after the run; score a snapshot with "
+                        "`python -m ropart.eval --resume <snapshot>`")
     # optim / schedule
     p.add_argument("--lr", default=5e-4, type=float)
     p.add_argument("--warmup-lr", default=1e-6, type=float)
