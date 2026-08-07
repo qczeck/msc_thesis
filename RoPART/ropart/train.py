@@ -1,10 +1,11 @@
-"""RoPART training entry point — pretraining and linear-probe.
+"""RoPART training entry point — pretraining, finetune and linear-probe.
 
 Run as a module from the ``RoPART/`` directory so both ``ropart`` and ``helpers``
 are importable:
 
     python -m ropart.train --control translation --epochs 100 ...
     python -m ropart.train --control raw         --epochs 100 ...     # rotation
+    python -m ropart.train --finetune --init-from out/.../checkpoint.pth
     python -m ropart.train --linear-probe --resume out/.../checkpoint.pth
 
 Device is auto-selected (cuda -> mps -> cpu); AMP is used only on CUDA. wandb runs
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.nn.init import trunc_normal_
 
 from ropart.controls import available_controls, build_extractor, control_kwargs
 from ropart.data import (
@@ -411,6 +413,155 @@ def run_overfit(args, device):
 
 
 # --------------------------------------------------------------------------- #
+# End-to-end finetune (the paper-matched downstream protocol)
+# --------------------------------------------------------------------------- #
+
+
+def load_encoder_for_finetune(init_from: str, args, device) -> tuple[RoPARTViT, int]:
+    """Rebuild the encoder from a pretrain checkpoint, ready for end-to-end finetune.
+
+    Returns ``(model, img_size)``.
+
+    Implements the source paper's downstream protocol (§4, "Training setup"): the
+    relative encoder is discarded and replaced by a linear head on the ``[CLS]``
+    token, and *randomly initialised learnable position embeddings* are introduced —
+    unlike pretraining, which runs with ``add_pos=False``.
+
+    Three details are load-bearing:
+
+    1. ``head.*`` is dropped, not loaded. The relative head has no role downstream,
+       and leaving it attached would put its parameters in the optimiser.
+    2. ``clf.*`` is dropped. ``strict=False`` tolerates missing/unexpected keys but
+       still **raises on a shape mismatch**, which is exactly what a 100-class
+       pretrain checkpoint meets on the 2-output horizon head.
+    3. ``pos_embed`` is re-initialised explicitly. The checkpoint carries one, but it
+       holds its untouched pretrain-time random init (pretraining never routes
+       gradient to it), so inheriting it silently is *not* the same thing as the
+       paper's "randomly initialized" — and it would tie every arm to whatever the
+       pretrain seed happened to draw.
+    """
+    ckpt = torch.load(init_from, map_location="cpu")
+    ckpt_args = ckpt.get("args", {})
+    cfg = model_config(ckpt_args.get("model", args.model))
+    head_w = ckpt["model"].get("head.output_project.weight")
+    num_channels = head_w.shape[0] if head_w is not None else ckpt_args.get("num_channels", 2)
+
+    model = RoPARTViT(
+        **cfg, num_classes=args.num_classes,
+        num_channels=num_channels, num_pairs=ckpt_args.get("num_pairs", 64),
+        mask_prob=0.0, drop_path_rate=args.drop_path,
+        cross_attention_query_type=ckpt_args.get("query_type", "patch_cat"),
+        use_pe=True,
+    ).to(device)
+
+    state = {k: v for k, v in ckpt["model"].items()
+             if not k.startswith("head.") and not k.startswith("clf.")}
+    incompatible = model.load_state_dict(state, strict=False)
+    dropped = len(ckpt["model"]) - len(state)
+    print(f"finetune: loaded encoder from {init_from} (epoch {ckpt.get('epoch')}); "
+          f"dropped {dropped} head/clf keys, "
+          f"missing={len(incompatible.missing_keys)} unexpected={len(incompatible.unexpected_keys)}")
+
+    # Fresh learnable position embeddings + classifier, per the paper.
+    trunc_normal_(model.pos_embed, std=0.02)
+    trunc_normal_(model.clf.weight, std=0.02)
+    torch.nn.init.constant_(model.clf.bias, 0)
+    # The relative head is discarded downstream; drop it so its parameters cannot
+    # enter the optimiser or the parameter count.
+    model.head = torch.nn.Identity()
+
+    for p in model.parameters():
+        p.requires_grad = True
+    return model.to(device), cfg["img_size"]
+
+
+def run_finetune(args, device):
+    """End-to-end supervised finetune of a pretrained RoPART encoder.
+
+    The protocol is deliberately identical across arms — only ``--init-from``
+    differs — so a downstream difference is attributable to the pretext objective
+    and not to the finetuning recipe.
+    """
+    assert args.init_from, "--finetune needs --init-from <pretrain checkpoint>"
+
+    if args.finetune_task == "horizon":
+        # Imported lazily: the HLW pipeline is only needed on this branch, so the
+        # classification arm does not depend on the dataset being present.
+        from ropart.hlw import build_hlw_datasets, horizon_run_epoch
+        args.num_classes = 2  # (theta, rho)
+    model, cfg_img = load_encoder_for_finetune(args.init_from, args, device)
+    print(f"params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable")
+
+    if args.finetune_task == "horizon":
+        train_ds, val_ds = build_hlw_datasets(args.data_path, img_size=cfg_img)
+        run_epoch, metric_key = horizon_run_epoch, "auc"
+    else:
+        if args.data_set == "IMAGENET":
+            train_ds, val_ds = build_cls_dataset_imagenet(args.data_path, img_size=cfg_img)
+        else:
+            train_ds, val_ds = build_cls_dataset(args.data_path, img_size=cfg_img)
+        run_epoch, metric_key = cls_run_epoch, "acc1"
+
+    train_loader = torch.utils.data.DataLoader(
+        train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True,
+        **loader_kwargs(args, device))
+    val_loader = torch.utils.data.DataLoader(
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        **loader_kwargs(args, device))
+
+    optimizer = torch.optim.AdamW(param_groups(model, args.weight_decay), lr=args.lr,
+                                  betas=(0.9, 0.999))
+    scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" else None
+    amp_dtype = torch.bfloat16 if args.amp_dtype == "bfloat16" else torch.float16
+
+    # --resume keeps its usual meaning here (continue *this* finetune), distinct from
+    # --init-from (seed it from a pretrain run). The cluster env script auto-resumes
+    # by passing --resume, so overloading it would silently break restart-on-death.
+    start_epoch, resumed_id = 0, None
+    if args.resume:
+        ck = torch.load(args.resume, map_location="cpu")
+        model.load_state_dict(ck["model"])
+        optimizer.load_state_dict(ck["optimizer"])
+        start_epoch = ck["epoch"] + 1
+        resumed_id = ck.get("wandb_id")
+        print(f"resumed finetune from {args.resume} at epoch {start_epoch}")
+
+    args.wandb_id = resolve_run_id(args, resumed_id)
+    wb = WandbRun(args, vars(args))
+    out_dir = Path(args.output_dir)
+
+    best = 0.0
+    for epoch in range(start_epoch, args.epochs):
+        lr = lr_at(epoch, args)
+        for g in optimizer.param_groups:
+            g["lr"] = lr
+        t0 = time.time()
+        train_stats = run_epoch(model, train_loader, device, optimizer=optimizer,
+                                scaler=scaler, amp_dtype=amp_dtype, max_steps=args.max_steps)
+        do_eval = (epoch % args.eval_every == 0) or (epoch == args.epochs - 1)
+        val_stats = (run_epoch(model, val_loader, device, amp_dtype=amp_dtype,
+                               max_steps=args.max_steps) if do_eval else None)
+        dt = time.time() - t0
+        log = {"epoch": epoch, "lr": lr, "epoch_time_s": dt,
+               **{f"train/{k}": v for k, v in train_stats.items()}}
+        if val_stats is not None:
+            best = max(best, val_stats[metric_key])
+            log.update({f"val/{k}": v for k, v in val_stats.items()},
+                       **{f"val/best_{metric_key}": best})
+        wb.log(log, step=epoch)
+        print(f"[ft {epoch}] lr={lr:.2e} train_{metric_key}={train_stats[metric_key]:.3f}"
+              + (f" val_{metric_key}={val_stats[metric_key]:.3f} best={best:.3f}"
+                 if val_stats is not None else "")
+              + f" ({dt:.0f}s)")
+        save_checkpoint(out_dir / "checkpoint.pth", model, optimizer, epoch, args,
+                        extra={"wandb_id": args.wandb_id, "init_from": args.init_from})
+        if args.save_every and (epoch + 1) % args.save_every == 0:
+            save_checkpoint(out_dir / f"checkpoint_ep{epoch:04d}.pth", model, optimizer,
+                            epoch, args, extra={"wandb_id": args.wandb_id})
+    wb.finish()
+
+
+# --------------------------------------------------------------------------- #
 # Linear probe
 # --------------------------------------------------------------------------- #
 
@@ -552,6 +703,20 @@ def get_args():
     p.add_argument("--sigma-max", default=0.8, type=float)
     # mode
     p.add_argument("--linear-probe", action="store_true")
+    p.add_argument("--finetune", action="store_true",
+                   help="end-to-end supervised finetune of a pretrained encoder — the "
+                        "source paper's downstream protocol (§4): relative head dropped, "
+                        "linear head on [CLS], freshly initialised learnable position "
+                        "embeddings, nothing frozen. Needs --init-from")
+    p.add_argument("--finetune-task", default="classify", choices=["classify", "horizon"],
+                   help="'classify' (default): top-1 on CIFAR-100/ImageNet-100. "
+                        "'horizon': HLW horizon-line regression, the orientation-sensitive "
+                        "task; predicts (theta, rho) and scores AUC of horizon error")
+    p.add_argument("--init-from", default="",
+                   help="pretrain checkpoint to seed a finetune from. Deliberately NOT "
+                        "--resume: the cluster env script auto-resumes a dead job by "
+                        "passing --resume <this run's checkpoint>, so the two meanings "
+                        "must stay separate or restart-on-death silently reinitialises")
     p.add_argument("--overfit-steps", default=0, type=int,
                    help="diagnostic: fit one fixed batch for N steps (0=off)")
     p.add_argument("--resume", default="")
@@ -580,6 +745,8 @@ def main():
     print(f"device: {device}")
     if args.overfit_steps > 0:
         run_overfit(args, device)
+    elif args.finetune:
+        run_finetune(args, device)
     elif args.linear_probe:
         run_linear_probe(args, device)
     else:

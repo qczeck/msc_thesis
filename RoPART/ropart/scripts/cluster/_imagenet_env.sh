@@ -60,3 +60,46 @@ run_imagenet() {
     --wandb-name "${wname}" \
     "${resume[@]}" "$@"
 }
+
+# finetune_imagenet <wandb-name> [extra train args...]
+#
+# The Phase-3 downstream protocol, matching the source paper (§4 "Training setup"):
+# end-to-end supervised finetune with the relative head dropped, a linear head on
+# [CLS], and freshly initialised learnable position embeddings. Nothing is frozen.
+#
+# Requires two env vars, both deliberately mandatory:
+#   OUT_NAME   fresh output dir for THIS finetune (never a pretrain dir — see below)
+#   INIT_FROM  the pretrain checkpoint whose encoder seeds the run
+#
+# The --init-from / --resume split matters. `--resume` keeps its usual meaning
+# (continue this finetune, used by the auto-resume below when SLURM kills a job);
+# `--init-from` seeds a *new* finetune from pretrained weights. Collapsing them into
+# one flag would make a restart-on-death silently reinitialise from the pretrain
+# checkpoint and throw away the finetune's progress.
+#
+# --model is not passed: run_finetune reads the architecture from the checkpoint's
+# stored args, so a P=32 encoder finetunes as ViT-B/32 without repeating it here.
+finetune_imagenet() {
+  local wname="$1"; shift
+  : "${OUT_NAME:?finetune_imagenet needs OUT_NAME (fresh dir for this finetune)}"
+  : "${INIT_FROM:?finetune_imagenet needs INIT_FROM (pretrain checkpoint to seed from)}"
+  local out="${OUT_ROOT}/${OUT_NAME}"
+  [ -f "${INIT_FROM}" ] || { echo "ERROR: INIT_FROM not found: ${INIT_FROM}" >&2; exit 1; }
+  # Guard the clobber hazard: OUT_NAME must not be the pretrain run's own dir, or the
+  # finetune would overwrite the encoder it was seeded from.
+  [ "${out}/checkpoint.pth" = "${INIT_FROM}" ] && {
+    echo "ERROR: OUT_NAME points at INIT_FROM — pick a fresh OUT_NAME" >&2; exit 1; }
+  local resume=()
+  [ -f "${out}/checkpoint.pth" ] && resume=(--resume "${out}/checkpoint.pth") && \
+    echo "[slurm] resuming finetune from ${out}/checkpoint.pth"
+  echo "[slurm] finetune out=${out} init_from=${INIT_FROM}"
+  python -m ropart.train --finetune \
+    --init-from "${INIT_FROM}" \
+    --data-set IMAGENET --data-path "${DATA}" \
+    --epochs 100 --warmup-epochs 5 --lr 1e-4 --min-lr 1e-6 --eval-every 1 \
+    --batch-size 192 --num_workers 16 --amp-dtype bfloat16 \
+    --output_dir "${out}" \
+    --wandb-mode "${WANDB_MODE}" --wandb-project "${WANDB_PROJECT:-ropart}" \
+    --wandb-name "${wname}" \
+    "${resume[@]}" "$@"
+}
