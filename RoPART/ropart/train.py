@@ -557,8 +557,14 @@ def run_finetune(args, device):
             log.update({f"val/{k}": v for k, v in val_stats.items()},
                        **{f"val/best_{metric_key}": best})
         wb.log(log, step=epoch)
-        extras = "".join(f" val_{k}={val_stats[k]:.4f}"
-                         for k in extra_keys if val_stats is not None and k in val_stats)
+        # Both train and val: a channel flat on *val* but falling on *train* is
+        # overfitting, whereas flat on both means the signal is not being extracted at
+        # all. Those call for opposite responses, and the val number alone cannot tell
+        # them apart — which matters most for theta, the orientation channel.
+        extras = "".join(f" train_{k}={train_stats[k]:.4f}" for k in extra_keys
+                         if k in train_stats)
+        extras += "".join(f" val_{k}={val_stats[k]:.4f}"
+                          for k in extra_keys if val_stats is not None and k in val_stats)
         print(f"[ft {epoch}] lr={lr:.2e} train_{metric_key}={train_stats[metric_key]:.3f}"
               + (f" val_{metric_key}={val_stats[metric_key]:.3f} best={best:.3f}"
                  if val_stats is not None else "")
