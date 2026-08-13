@@ -496,12 +496,19 @@ def run_finetune(args, device):
     if args.finetune_task == "horizon":
         train_ds, val_ds = build_hlw_datasets(args.data_path, img_size=cfg_img)
         run_epoch, metric_key = horizon_run_epoch, "auc"
+        # Printed alongside `auc` in run.log. Not cosmetic: the AUC is structurally
+        # dominated by rho (~26x — see horizon_run_epoch), so theta_mae is the number
+        # the orientation claim actually rests on. W&B receives every key, but W&B is
+        # offline behind a sync loop and the IN-100 arms were analysed from run.log —
+        # so the headline metric has to be in the text log too.
+        extra_keys = ("theta_mae", "rho_mae")
     else:
         if args.data_set == "IMAGENET":
             train_ds, val_ds = build_cls_dataset_imagenet(args.data_path, img_size=cfg_img)
         else:
             train_ds, val_ds = build_cls_dataset(args.data_path, img_size=cfg_img)
         run_epoch, metric_key = cls_run_epoch, "acc1"
+        extra_keys = ()
 
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True,
@@ -550,9 +557,12 @@ def run_finetune(args, device):
             log.update({f"val/{k}": v for k, v in val_stats.items()},
                        **{f"val/best_{metric_key}": best})
         wb.log(log, step=epoch)
+        extras = "".join(f" val_{k}={val_stats[k]:.4f}"
+                         for k in extra_keys if val_stats is not None and k in val_stats)
         print(f"[ft {epoch}] lr={lr:.2e} train_{metric_key}={train_stats[metric_key]:.3f}"
               + (f" val_{metric_key}={val_stats[metric_key]:.3f} best={best:.3f}"
                  if val_stats is not None else "")
+              + extras
               + f" ({dt:.0f}s)")
         save_checkpoint(out_dir / "checkpoint.pth", model, optimizer, epoch, args,
                         extra={"wandb_id": args.wandb_id, "init_from": args.init_from})
