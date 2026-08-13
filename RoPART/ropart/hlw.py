@@ -28,13 +28,21 @@ natural parameterisation even though the network predicts ``(theta, rho)``.
 Reference difficulty: Lezama et al. reach **52.59%** AUC on HLW, against 94.07% on YUD
 and 89.57% on ECD. HLW is the hard one.
 
-.. warning::
-   **The coordinate convention in ``metadata.csv`` must be verified against real images
-   before any run is trusted.** The endpoints are documented as zero-centred, but the
-   sign of the y-axis (image-down vs maths-up) is not something this module can confirm
-   without the data. Run ``python -m ropart.hlw --verify <hlw_root>`` once the dataset
-   lands: it renders sample images with the parsed horizon drawn on, which settles the
-   convention immediately. Set :data:`Y_AXIS_DOWN` accordingly.
+.. note::
+   **The y-axis convention was settled on 2026-08-13: metadata y increases UPWARDS**
+   (maths convention), so :data:`Y_AXIS_DOWN` is ``False``. Two independent strands
+   agree:
+
+   1. The NG-DSAC reference loader negates y before applying the centre offset
+      (``vislearn/ngdsac_horizon``, ``hlw_dataset.py`` lines 77-84: ``gt[1] *= -1``
+      then ``gt[1] += yOffset``, likewise for ``gt[3]``).
+   2. ``python -m ropart.hlw --verify <hlw_root>`` renders agree on 8/8 test images
+      under ``False`` and fail under ``True``. Judge only on images where the line
+      sits **far from the image centre** — a sign flip is nearly invisible near the
+      centre, which is what made the original ``True`` renders look acceptable.
+
+   A wrong setting here trains and converges perfectly well while producing a
+   meaningless AUC, so re-run ``--verify`` if this constant is ever touched.
 
 Dataset layout (v1, 13 GB — same test set as v2, and the version the NG-DSAC baseline
 uses)::
@@ -43,7 +51,10 @@ uses)::
     <root>/split/{train,val,test}.txt   plain-text image lists, one path per line
     <root>/metadata.csv          rows: filename, x1, y1, x2, y2
 
-Splits: 100,553 images total — 2,018 test, 525 val, ~98,010 train.
+Splits (v1, counted from the archive on 2026-08-12 — 100,553 is the paper's full
+collection, not what v1 ships): **19,809 images total — 16,906 train, 885 val,
+2,018 test**. ``test.txt`` further decomposes into ``test_seen.txt`` (1,300) and
+``test_heldout.txt`` (718), a free generalisation control.
 Licence: CC BY-NC 4.0, research use only.
 """
 
@@ -62,8 +73,9 @@ from ropart.data import MEAN, STD
 from ropart.engine import _amp_ctx, _Meters
 
 #: Whether ``metadata.csv`` y-coordinates increase **downwards** (image convention).
-#: Verify with ``--verify`` before trusting any result; see the module warning.
-Y_AXIS_DOWN = True
+#: ``False`` — metadata y is maths-convention (up). Settled 2026-08-13 against the
+#: NG-DSAC reference loader and 8/8 ``--verify`` renders; see the module note.
+Y_AXIS_DOWN = False
 
 #: Error threshold for the AUC, per the standard protocol.
 AUC_THRESHOLD = 0.25
@@ -224,31 +236,57 @@ class HLWDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.names)
 
-    def __getitem__(self, i: int):
-        name = self.names[i]
-        img = Image.open(self.root / "images" / name).convert("RGB")
-        w, h = img.size
+    def _geometry(self, w: int, h: int) -> tuple[float, float, float, float, float]:
+        """Resize-and-centre-crop geometry for a ``w x h`` image.
+
+        Returns ``(scale, sw, sh, left, top)``: the short-side scale, the resized
+        dimensions, and the top-left corner of the crop box within them.
+        """
+        scale = self.img_size / min(w, h)
+        sw, sh = w * scale, h * scale
+        return scale, sw, sh, (sw - self.img_size) / 2.0, (sh - self.img_size) / 2.0
+
+    def target_for(self, name: str, w: int, h: int, flip: bool = False) -> tuple[float, float]:
+        """``(theta, rho)`` for one image, from its **dimensions and metadata alone**.
+
+        Split out of :meth:`__getitem__` so the label distribution can be characterised
+        without decoding pixels — a full decode of the training set costs minutes, a
+        header read costs seconds — while keeping exactly one copy of the label maths.
+        Decoding and this must never disagree, so they share the code rather than
+        mirroring it.
+
+        Args:
+            name: listing entry, used to look up the metadata row.
+            w, h: dimensions of the **original** image, in pixels.
+            flip: whether the horizontal train-time flip was applied to the pixels.
+        """
         x1, y1, x2, y2 = self.meta[_key(name)]
         # metadata is centred; move to top-left origin so the crop maths is uniform.
         sign = 1.0 if Y_AXIS_DOWN else -1.0
         pts = (x1 + w / 2.0, sign * y1 + h / 2.0, x2 + w / 2.0, sign * y2 + h / 2.0)
+        scale, _, _, left, top = self._geometry(w, h)
+        # Endpoints through the same resize-then-crop, in the output centre frame.
+        cpts, (_, oh) = transform_endpoints(
+            (pts[0] * scale, pts[1] * scale, pts[2] * scale, pts[3] * scale),
+            (left, top, self.img_size, self.img_size), 1.0)
+        if flip:                                     # horizontal flip: x -> -x
+            cpts = (-cpts[0], cpts[1], -cpts[2], cpts[3])
+        return endpoints_to_theta_rho(*cpts, height=oh)
 
-        scale = self.img_size / min(w, h)
-        sw, sh = w * scale, h * scale
-        left, top = (sw - self.img_size) / 2.0, (sh - self.img_size) / 2.0
+    def __getitem__(self, i: int):
+        name = self.names[i]
+        img = Image.open(self.root / "images" / name).convert("RGB")
+        w, h = img.size
+        _, sw, sh, left, top = self._geometry(w, h)
         img = img.resize((max(1, round(sw)), max(1, round(sh))), Image.BILINEAR)
         img = img.crop((round(left), round(top),
                         round(left) + self.img_size, round(top) + self.img_size))
-        # Endpoints through the same resize-then-crop, expressed in the output centre frame.
-        cpts, (ow, oh) = transform_endpoints(
-            (pts[0] * scale, pts[1] * scale, pts[2] * scale, pts[3] * scale),
-            (left, top, self.img_size, self.img_size), 1.0)
 
-        if self.train and torch.rand(()) < 0.5:      # horizontal flip: x -> -x
+        flip = bool(self.train and torch.rand(()) < 0.5)
+        if flip:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
-            cpts = (-cpts[0], cpts[1], -cpts[2], cpts[3])
 
-        theta, rho = endpoints_to_theta_rho(*cpts, height=oh)
+        theta, rho = self.target_for(name, w, h, flip=flip)
         x = self.normalize(transforms.functional.to_tensor(img))
         return x, torch.tensor([theta, rho], dtype=torch.float32)
 
@@ -272,11 +310,22 @@ def _read_metadata(path: Path) -> dict[str, tuple[float, float, float, float]]:
     return out
 
 
-def build_hlw_datasets(root: str, *, img_size: int = 224):
-    """Train/val datasets for the finetune loop. Val is HLW's held-out **test** split
-    (2,018 images) — the 525-image ``val`` split is too small to track per epoch."""
+def build_hlw_datasets(root: str, *, img_size: int = 224, val_split: str = "val"):
+    """Train/val datasets for the finetune loop.
+
+    Per-epoch validation uses HLW's **``val``** split (885 images — the earlier "525"
+    figure was wrong; counted from the archive 2026-08-12). ``test`` is deliberately
+    *not* tracked per epoch: reporting "best epoch on test" over 100 evaluations is
+    test-set peeking. Score ``test`` once, at the end, with the selected checkpoint.
+
+    Args:
+        root: dataset root containing ``images/``, ``split/`` and ``metadata.csv``.
+        img_size: side length of the square centre crop.
+        val_split: split to validate on per epoch. Pass ``"test"`` only for the
+            single final scoring run.
+    """
     return (HLWDataset(root, "train", img_size, train=True),
-            HLWDataset(root, "test", img_size, train=False))
+            HLWDataset(root, val_split, img_size, train=False))
 
 
 # --------------------------------------------------------------------------- #

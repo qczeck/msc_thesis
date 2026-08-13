@@ -19,6 +19,7 @@ import argparse
 import math
 import random
 import re
+import socket
 import time
 from pathlib import Path
 
@@ -742,7 +743,13 @@ def main():
     if args.num_workers > 0 and "file_system" in torch.multiprocessing.get_all_sharing_strategies():
         torch.multiprocessing.set_sharing_strategy("file_system")
     device = pick_device(args.device)
-    print(f"device: {device}")
+    # Provenance, printed before any work: which box, which GPU, which seed. The lab
+    # GPUs have no scheduler and so no job record, and arms are launched two at a time
+    # across boxes — without this the only way to tell which box ran which arm is to
+    # infer it from per-epoch timings, which is guesswork and cannot distinguish two
+    # identical models. Cheap insurance against a hardware/arm confound.
+    gpu = torch.cuda.get_device_name(0) if device.type == "cuda" else "-"
+    print(f"device: {device} host: {socket.gethostname()} gpu: {gpu} seed: {args.seed}")
     if args.overfit_steps > 0:
         run_overfit(args, device)
     elif args.finetune:
