@@ -2,8 +2,12 @@
 # Phase-3 HLW horizon-line finetune on a **standalone DoC lab GPU box** (gpu01-32).
 # The orientation-sensitive half of Phase 3; the classification half is run_finetune_doc.sh.
 #
-#   usage: run_horizon_doc.sh <arm> [--seed N] [--dry-run] [extra ropart.train args]
+#   usage: run_horizon_doc.sh <arm> [--seed N] [--tag NAME] [--dry-run] [extra args]
 #          arm in {base, ch2, w30, w90}
+#
+#   Use --tag for anything throwaway, e.g. a smoke:
+#     run_horizon_doc.sh base --tag smoke --epochs 2
+#   It gives the run its own OUT_NAME so it cannot be resumed into by the real run.
 #
 # >>> THE RECIPE HERE MIRRORS run_finetune_doc.sh AND MUST BE KEPT IN SYNC WITH IT. <<<
 # Same encoders, same 100 epochs / warmup 5 / lr 1e-4 / cosine to 1e-6 / batch 192 / fp16 /
@@ -16,39 +20,51 @@
 # WHAT IS BEING MEASURED. Predict (theta, rho); report AUC via (l, r). theta *is* in-plane
 # orientation and rho is translation-like, so the task carries a built-in specificity
 # control: RoPART should improve theta and leave rho near the translation-only baseline.
-# horizon_run_epoch reports theta_mae (degrees) and rho_mae separately for exactly this.
 #
-# ⚠ TWO THINGS TO SETTLE BEFORE TRUSTING ANY NUMBER FROM THIS SCRIPT:
-#   1. Y_AXIS_DOWN in ropart/hlw.py. metadata.csv endpoints are documented as zero-centred
-#      but the y-sign is not stated anywhere reachable. A wrong guess trains and converges
-#      perfectly well while producing a meaningless AUC. Settle it first:
-#        python -m ropart.hlw --verify $WS/hlw --n 12 --out ~/hlw_verify
-#      then look at the PNGs: the red line must lie on the visible horizon.
-#   2. The constant-predictor floor. Without it an AUC of 0.4 is uninterpretable. theta is
-#      ~radians (small) and rho ~image heights, so the shared smooth_l1 may also under-weight
-#      theta relative to rho — which would blunt the specificity control. Check the epoch-1
-#      theta_mae/rho_mae against the floor before committing to a full 4-arm set.
+# ⚠ READ theta_mae, NOT auc, FOR THE ORIENTATION CLAIM. The AUC is structurally dominated
+# by rho: with a square crop the edge offsets are l, r = rho -/+ tan(theta)/2, so a theta
+# error enters at *half* weight and a rho error at full weight. At the constant-predictor
+# floor that is 0.0127 vs 0.3269 image heights — rho outweighs theta ~26x. A real
+# orientation advantage would be nearly invisible in the AUC. horizon_run_epoch reports
+# theta_mae (degrees) and rho_mae separately for exactly this reason; auc is kept for
+# comparability with the published protocol, not as the headline.
+#
+# BASELINES to compare epoch-1 numbers against (HLW v1 train-mean constant predictor,
+# measured 2026-08-13 on val): auc 27.71%, theta_mae 1.459 deg, rho_mae 0.3269. An arm
+# near those has learned nothing. Because the head predicts standardised targets, an
+# untrained head starts exactly at this floor.
+#
+# SETTLED 2026-08-13, no longer a pre-flight check: Y_AXIS_DOWN = False (metadata y is
+# maths-convention/up), confirmed against the NG-DSAC reference loader and 8/8 --verify
+# renders. See ropart/hlw.py. Re-run --verify only if that constant is ever touched.
 #
 # Data layout expected at ${HLW_ROOT}: images/, split/{train,val,test}.txt, metadata.csv.
-# Train is the ~98k-image train split; "val" during finetune is HLW's held-out 2,018-image
-# **test** split (the 525-image val split is too small to track per epoch).
+# HLW v1 train is 16,906 images (not the ~98k the paper's full collection suggests), and
+# per-epoch validation uses the 885-image **val** split — test is scored once, at the end,
+# so that "best epoch" is not a selection over 100 evaluations on the test set.
+#
+# HLW_ROOT defaults to the **preprocessed** root ($WS/hlw224). The raw root also works and
+# is label-identical, but every epoch re-reads full-resolution originals over NFS, which
+# makes the run I/O-bound rather than GPU-bound. Override with HLW_ROOT=... if needed.
 set -euo pipefail
 
 ARM="${1:?usage: run_horizon_doc.sh <base|ch2|w30|w90> [--seed N] [--dry-run] [extra args]}"
 shift
 DRY=0
 SEED=0
+TAG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
     --seed)    SEED="${2:?--seed needs a value}"; shift 2 ;;
+    --tag)     TAG="${2:?--tag needs a value}"; shift 2 ;;
     *)         break ;;      # everything else is passed through to ropart.train
   esac
 done
 
 REPO="${REPO:-${HOME}/msc_thesis/RoPART}"
 WS="${WS:-/vol/gpudata/${USER}-ropart-in100}"
-HLW_ROOT="${HLW_ROOT:-${WS}/hlw}"
+HLW_ROOT="${HLW_ROOT:-${WS}/hlw224}"
 OUT_ROOT="${WS}/out"
 
 # arm -> pretrained encoder OUT_NAME | wandb run name. Identical mapping to
@@ -67,6 +83,15 @@ if [ "${SEED}" = "0" ]; then
 else
   OUT_NAME="hlw_ft_${ARM}_p32_s${SEED}"
   WNAME="${WNAME}-s${SEED}"
+fi
+# --tag isolates throwaway runs (smokes, config trials) into their own OUT_NAME. Without
+# it a 2-epoch smoke writes checkpoint.pth into the *real* run's directory, and the real
+# run then silently auto-resumes from it — having already spent epochs 1-2 on a cosine
+# schedule compressed to 2 epochs. That failure is invisible: the run completes, the
+# curves look plausible, and the LR schedule is quietly wrong for the whole arm.
+if [ -n "${TAG}" ]; then
+  OUT_NAME="${OUT_NAME}_${TAG}"
+  WNAME="${WNAME}-${TAG}"
 fi
 OUT="${OUT_ROOT}/${OUT_NAME}"
 LOG="${OUT}/run.log"

@@ -81,8 +81,16 @@ def main() -> None:
     s_theta, s_rho = float(fit[:, 0].std()), float(fit[:, 1].std())
     print(f"\nsd(theta) = {s_theta:.5f} rad   sd(rho) = {s_rho:.5f} image heights"
           f"   ratio rho/theta = {s_rho / max(s_theta, 1e-12):.2f}x")
-    print("A ratio far from 1 means the shared smooth_l1 does not weight the two channels "
+    print("A ratio far from 1 means a shared smooth_l1 would not weight the two channels "
           "equally; theta is the channel the orientation claim rests on.")
+
+    # Paste-ready, because these are module constants in ropart.hlw and a different
+    # training set (HLWv2) needs its own. Getting them stale is silent: the model would
+    # still train, just against a slightly wrong centre and scale.
+    mu_fit = fit.mean(dim=0)
+    print(f"\n--- constants for ropart/hlw.py (fit split = {a.fit}) ---")
+    print(f"TARGET_MEAN: tuple[float, float] = ({float(mu_fit[0]):.4e}, {float(mu_fit[1]):.6f})")
+    print(f"TARGET_STD: tuple[float, float] = ({s_theta:.4e}, {s_rho:.6f})")
 
     # Constant predictor: the training mean, which is the best constant under L2.
     mu = fit.mean(dim=0)

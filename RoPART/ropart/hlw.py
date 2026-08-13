@@ -80,6 +80,29 @@ Y_AXIS_DOWN = False
 #: Error threshold for the AUC, per the standard protocol.
 AUC_THRESHOLD = 0.25
 
+#: Per-channel ``(theta, rho)`` mean and standard deviation of the **HLW v1 train split**,
+#: theta in radians and rho in image heights, measured 2026-08-13 over all 16,906 images
+#: with ``python -m ropart.scripts.hlw_target_stats --root $WS/hlw224 --fit train``.
+#:
+#: The regression head predicts **standardised** targets, and these convert back. Three
+#: reasons, in order of importance:
+#:
+#: 1. ``sd(rho) / sd(theta) = 9.70``, so a single ``smooth_l1(beta=0.05)`` over raw targets
+#:    treats the two channels very differently: rho residuals sit in the loss's *linear*
+#:    regime (gradient +/-1) while theta residuals straddle ``beta`` and spend much of their
+#:    mass in the *quadratic* regime (gradient ``x/beta < 1``) — and sink further into it as
+#:    training improves theta. Standardising makes ``beta`` mean "0.05 sd" for both.
+#: 2. Both outputs are then O(1), which is far better conditioned for the randomly
+#:    initialised linear head than asking one unit to emit ~0.06 and another ~0.6.
+#: 3. Predicting zero becomes exactly the constant-predictor floor, so an untrained head
+#:    starts at the floor rather than somewhere arbitrary.
+#:
+#: Applied identically to every arm, so it cannot confound the between-arm comparison.
+#: **Recompute these for a different training set** (e.g. HLWv2) — ``hlw_target_stats``
+#: prints them in paste-ready form.
+TARGET_MEAN: tuple[float, float] = (2.077e-4, 0.237300)
+TARGET_STD: tuple[float, float] = (5.8653e-2, 0.569070)
+
 
 # --------------------------------------------------------------------------- #
 # Horizon geometry
@@ -339,14 +362,29 @@ def horizon_run_epoch(model, loader, device, *, optimizer=None, scaler=None,
     """One horizon-regression epoch (train if ``optimizer`` given, else eval).
 
     Mirrors :func:`ropart.engine.cls_run_epoch` so the finetune loop is identical
-    across the two Phase-3 tasks. Reports ``auc`` (the headline), plus ``theta_mae`` in
-    **degrees** and ``rho_mae`` separately — that split is the specificity control.
+    across the two Phase-3 tasks.
+
+    **The model predicts standardised targets** (see :data:`TARGET_MEAN` /
+    :data:`TARGET_STD`); predictions are converted back to raw units before any metric, so
+    everything reported here — and the AUC in particular — stays in the protocol's units
+    and is unaffected by the standardisation.
+
+    Reports ``auc`` plus ``theta_mae`` in **degrees** and ``rho_mae`` separately. **That
+    split is not a nicety — it is the result.** The AUC is structurally dominated by rho:
+    with a square crop (``W/H == 1``) the edge offsets are ``l, r = rho -/+ tan(theta)/2``,
+    so a theta error enters the AUC at *half* weight while a rho error enters at full
+    weight. At the constant-predictor floor that is 0.0127 vs 0.3269 image heights — rho
+    outweighs theta by ~26x. Since theta is the in-plane orientation channel the whole
+    task was chosen to probe, **``theta_mae`` is the headline for the orientation claim**
+    and ``auc`` is reported for comparability with the published protocol.
     """
     train = optimizer is not None
     model.train(train)
     meters = _Meters()
     errs: list[torch.Tensor] = []
     grad_ctx = torch.enable_grad() if train else torch.no_grad()
+    t_mean = torch.tensor(TARGET_MEAN, device=device, dtype=torch.float32)
+    t_std = torch.tensor(TARGET_STD, device=device, dtype=torch.float32)
 
     with grad_ctx:
         for step, (images, target) in enumerate(loader):
@@ -356,8 +394,8 @@ def horizon_run_epoch(model, loader, device, *, optimizer=None, scaler=None,
             target = target.to(device, non_blocking=True)
             bs = images.shape[0]
             with _amp_ctx(device, scaler is not None, amp_dtype):
-                pred = model.forward_classify(images)      # (b, 2) = (theta, rho)
-                loss = F.smooth_l1_loss(pred, target, beta=0.05)
+                pred = model.forward_classify(images)      # (b, 2), standardised
+                loss = F.smooth_l1_loss(pred, (target - t_mean) / t_std, beta=0.05)
             if train:
                 optimizer.zero_grad()
                 if scaler is not None:
@@ -368,7 +406,10 @@ def horizon_run_epoch(model, loader, device, *, optimizer=None, scaler=None,
                     loss.backward()
                     optimizer.step()
             with torch.no_grad():
-                p = pred.float()
+                # Back to raw units before any metric — in float32, since under AMP `pred`
+                # may be float16 and rho spans ~[-6, 12], which is fine in fp16 but the
+                # errors we care about are ~1e-3 and would be quantised away.
+                p = pred.float() * t_std + t_mean
                 t = target.float()
                 # Square crop, so W/H == 1 in the network's frame.
                 e = horizon_error(p[:, 0], p[:, 1], t[:, 0], t[:, 1], 1.0)
