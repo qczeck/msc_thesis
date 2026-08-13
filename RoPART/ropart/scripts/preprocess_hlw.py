@@ -29,9 +29,24 @@ Two deliberate non-transformations, for consistency with the load-time path:
   be defensible, but doing it in only one is silently wrong.
 * **No colour conversion beyond RGB**, matching the dataset.
 
+**Resumability matters here.** Measured throughput on v1 is ~290 images/min and the pass
+is I/O-bound at the NFS ceiling, so HLWv2's ~500k images is a multi-hour to ~29-hour job
+run unattended on a lab box that has no scheduler and that another user can claim at any
+moment. ``--skip-existing`` makes a restart idempotent and cheap: existing outputs are
+reused (two header reads, no decode) and only the remainder is converted. Combined with
+the atomic write in :func:`_resize_one`, a killed job never leaves a half-written image
+for the next run to accept.
+
+``metadata.csv`` is still written once, at the end. That is deliberate rather than an
+oversight: with ``--skip-existing`` a resumed run regenerates it in full from the images
+actually on disk, which is more robust than trying to merge a partial file — a partial
+``metadata.csv`` from a killed run is exactly the kind of state that looks complete and
+is not. **So a killed pass must be rerun to completion before the output tree is used.**
+
 Usage::
 
     python -m ropart.scripts.preprocess_hlw --src $WS/hlw --dst $WS/hlw224 --workers 8
+    python -m ropart.scripts.preprocess_hlw --src ... --dst ... --skip-existing   # resume
 
 Output mirrors the input layout — ``images/`` (same relative paths), ``metadata.csv``
 (endpoints rescaled), ``split/`` (copied verbatim) — so the two roots are interchangeable.
@@ -41,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import shutil
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -49,15 +65,28 @@ from pathlib import Path
 from PIL import Image
 
 
-def _resize_one(args: tuple[Path, Path, Path, int, int]) -> tuple[str, float | None]:
-    """Resize one image so its short side is ``size``. Returns ``(rel_path, scale)``.
+def _resize_one(args: tuple[Path, Path, Path, int, int, bool]) -> tuple[str, float | None, bool]:
+    """Resize one image so its short side is ``size``. Returns ``(rel_path, scale, reused)``.
 
     ``scale`` is ``None`` if the image could not be read, so the caller can drop the row
-    rather than emit a label with no pixels behind it.
+    rather than emit a label with no pixels behind it. ``reused`` is ``True`` when an
+    existing output was accepted instead of being reconverted.
+
+    **The output is written atomically** — to a temporary file in the destination
+    directory, then :func:`os.replace`, which is atomic within a filesystem. Without that,
+    a job killed mid-write leaves a truncated JPEG that ``--skip-existing`` would happily
+    accept on the next run, silently poisoning one image. With it, a destination file that
+    exists is necessarily complete, so the resume check needs no (expensive) full decode.
     """
-    src_root, dst_root, rel, size, quality = args
+    src_root, dst_root, rel, size, quality, skip_existing = args
     src, dst = src_root / rel, dst_root / rel
     try:
+        if skip_existing and dst.exists():
+            # Header reads only. The scale is recovered exactly rather than approximated:
+            # the conversion sets dst width to `nw` and returns `nw / w`, so dividing the
+            # two stored widths reproduces that value bit-for-bit.
+            with Image.open(src) as s, Image.open(dst) as d:
+                return str(rel), d.size[0] / s.size[0], True
         with Image.open(src) as im:
             im = im.convert("RGB")
             w, h = im.size
@@ -67,13 +96,15 @@ def _resize_one(args: tuple[Path, Path, Path, int, int]) -> tuple[str, float | N
             nw, nh = max(size, round(w * scale)), max(size, round(h * scale))
             im = im.resize((nw, nh), Image.BILINEAR)
             dst.parent.mkdir(parents=True, exist_ok=True)
-            im.save(dst, "JPEG", quality=quality)
+            tmp = dst.with_name(f".{dst.name}.{os.getpid()}.tmp")
+            im.save(tmp, "JPEG", quality=quality)
+        os.replace(tmp, dst)
         # Report the scale actually realised, not the requested one: the rounding above
         # can shift it slightly, and the labels must follow the pixels.
-        return str(rel), nw / w
+        return str(rel), nw / w, False
     except Exception as exc:                      # noqa: BLE001 - report, do not abort
         print(f"  skip {rel}: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return str(rel), None
+        return str(rel), None, False
 
 
 def _read_metadata(path: Path) -> dict[str, tuple[float, float, float, float]]:
@@ -97,6 +128,8 @@ def main() -> None:
     p.add_argument("--quality", type=int, default=95, help="output JPEG quality")
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--limit", type=int, default=0, help="process only N images (smoke test)")
+    p.add_argument("--skip-existing", action="store_true",
+                   help="reuse outputs that already exist — makes the pass resumable")
     a = p.parse_args()
 
     src_root, dst_root = Path(a.src), Path(a.dst)
@@ -112,20 +145,24 @@ def main() -> None:
     print(f"resizing {len(rels):,} images -> short side {a.size}, {a.workers} workers")
 
     (dst_root / "images").mkdir(parents=True, exist_ok=True)
-    jobs = [(src_root / "images", dst_root / "images", Path(r), a.size, a.quality)
+    jobs = [(src_root / "images", dst_root / "images", Path(r), a.size, a.quality,
+             a.skip_existing)
             for r in rels]
 
     scales: dict[str, float] = {}
-    done = 0
+    done = reused = 0
     with ProcessPoolExecutor(max_workers=a.workers) as pool:
         futures = [pool.submit(_resize_one, j) for j in jobs]
         for fut in as_completed(futures):
-            rel, scale = fut.result()
+            rel, scale, was_reused = fut.result()
             if scale is not None:
                 scales[rel] = scale
             done += 1
+            reused += was_reused
             if done % 5000 == 0:
-                print(f"  {done:,}/{len(jobs):,}", flush=True)
+                print(f"  {done:,}/{len(jobs):,} ({reused:,} reused)", flush=True)
+    if a.skip_existing:
+        print(f"reused {reused:,} existing outputs, converted {done - reused:,}")
 
     # Rescale the labels by the *realised* scale. Uniform scaling is sign-agnostic, so
     # this is correct under either Y_AXIS_DOWN convention — see the module docstring.
