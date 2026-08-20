@@ -13,6 +13,7 @@ import torch
 
 from ropart.hlw import (
     AUC_THRESHOLD,
+    _endpoints_from_row,
     endpoints_to_theta_rho,
     horizon_auc,
     horizon_error,
@@ -167,3 +168,19 @@ if __name__ == "__main__":
     test_auc_bounds()
     test_horizon_epoch_runs_on_a_model()
     print("\nALL HLW TESTS PASSED")
+
+
+def test_metadata_row_layouts_v1_and_v2():
+    """Both HLW ``metadata.csv`` layouts must yield the same four endpoint columns.
+
+    Regression test for 2026-08-20: v2 rows carry ``width, height`` before the endpoints,
+    so the unconditional ``row[1:5]`` slice read ``(width, height, x1, y1)`` and dropped
+    ``y2``. It produced a target distribution with a mean horizon tilt of -40.8 degrees
+    that trained and converged without complaint — nothing but the constants revealed it.
+    """
+    v1 = ["Alamo/a.jpg", "-5000", "445.311034", "5000", "-62.602260"]
+    v2 = ["0006/b.jpg", "1800", "2400", "-5000", "445.311034", "5000", "-62.602260"]
+    expected = (-5000.0, 445.311034, 5000.0, -62.602260)
+    assert _endpoints_from_row(v1) == expected
+    assert _endpoints_from_row(v2) == expected
+    assert _endpoints_from_row(["filename", "x1", "y1", "x2", "y2"]) is None

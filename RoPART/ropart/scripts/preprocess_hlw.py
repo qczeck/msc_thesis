@@ -14,7 +14,7 @@ makes this script safe to run *before* the ``Y_AXIS_DOWN`` question is settled:
   increases up or down, so rescaled metadata is correct under either convention.
 * A **crop is not**: it adds ``h/2`` offsets, whose sign depends on the convention. Bake
   a crop in now and a later flip of ``Y_AXIS_DOWN`` silently invalidates every label,
-  with 500k images to redo.
+  with 100,553 images to redo.
 
 So the centre crop stays where it is, in :class:`ropart.hlw.HLWDataset`, applied at load
 time to an already-small image (cheap). The dataset needs **no changes**: for a
@@ -30,7 +30,8 @@ Two deliberate non-transformations, for consistency with the load-time path:
 * **No colour conversion beyond RGB**, matching the dataset.
 
 **Resumability matters here.** Measured throughput on v1 is ~290 images/min and the pass
-is I/O-bound at the NFS ceiling, so HLWv2's ~500k images is a multi-hour to ~29-hour job
+is I/O-bound at the NFS ceiling, so HLWv2's 100,553 images is a ~5.7-hour job (measured
+2026-08-18 at 294 images/min, after a serial ~22-minute prescan that converts nothing)
 run unattended on a lab box that has no scheduler and that another user can claim at any
 moment. ``--skip-existing`` makes a restart idempotent and cheap: existing outputs are
 reused (two header reads, no decode) and only the remainder is converted. Combined with
@@ -107,16 +108,40 @@ def _resize_one(args: tuple[Path, Path, Path, int, int, bool]) -> tuple[str, flo
         return str(rel), None, False
 
 
+# Deliberately a second copy of ``ropart.hlw._endpoints_from_row`` rather than an import:
+# this script runs in a 6-process pool and must not drag torch in through ropart.hlw.
+# The two must not diverge — change both.
+def _endpoints_from_row(row: list[str]) -> tuple[float, float, float, float] | None:
+    """The four endpoint columns of one ``metadata.csv`` row, for **both** HLW layouts.
+
+    HLW **v1** rows are ``filename, x1, y1, x2, y2`` (5 columns); HLW **v2** rows carry
+    the image dimensions first — ``filename, width, height, x1, y1, x2, y2`` (7 columns).
+    Slicing ``row[1:5]`` unconditionally therefore reads ``(width, height, x1, y1)`` on v2
+    and drops ``y2`` entirely. That is a **silent** fault of exactly the kind this task is
+    full of: the run converges perfectly well against a meaningless target. Measured on
+    v2 train, the bad parse gives ``theta`` mean **-40.8 deg** against v1's **0.01 deg** —
+    an average 40-degree horizon tilt, which is how it was caught.
+
+    The column count is the only thing that distinguishes the two layouts, so discriminate
+    on it. Returns ``None`` for a header row, which the callers skip.
+    """
+    cols = row[3:7] if len(row) >= 7 else row[1:5]
+    try:
+        return tuple(float(v) for v in cols)  # type: ignore[return-value]
+    except ValueError:      # header row
+        return None
+
+
 def _read_metadata(path: Path) -> dict[str, tuple[float, float, float, float]]:
     out: dict[str, tuple[float, float, float, float]] = {}
     with open(path, newline="") as fh:
         for row in csv.reader(fh):
             if len(row) < 5:
                 continue
-            try:
-                out[row[0]] = tuple(float(v) for v in row[1:5])  # type: ignore[assignment]
-            except ValueError:                     # header row
+            vals = _endpoints_from_row(row)
+            if vals is None:
                 continue
+            out[row[0]] = vals
     return out
 
 

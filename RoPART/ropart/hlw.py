@@ -51,6 +51,10 @@ uses)::
     <root>/split/{train,val,test}.txt   plain-text image lists, one path per line
     <root>/metadata.csv          rows: filename, x1, y1, x2, y2
 
+**v2 puts the image dimensions first** — ``filename, width, height, x1, y1, x2, y2``
+(7 columns, not 5). :func:`_endpoints_from_row` discriminates on the column count;
+see there for why the naive slice is a silent fault rather than a loud one.
+
 Splits (v1, counted from the archive on 2026-08-12 — 100,553 is the paper's full
 collection, not what v1 ships): **19,809 images total — 16,906 train, 885 val,
 2,018 test**. ``test.txt`` further decomposes into ``test_seen.txt`` (1,300) and
@@ -62,6 +66,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 from pathlib import Path
 
 import torch
@@ -100,8 +105,44 @@ AUC_THRESHOLD = 0.25
 #: Applied identically to every arm, so it cannot confound the between-arm comparison.
 #: **Recompute these for a different training set** (e.g. HLWv2) — ``hlw_target_stats``
 #: prints them in paste-ready form.
-TARGET_MEAN: tuple[float, float] = (2.077e-4, 0.237300)
-TARGET_STD: tuple[float, float] = (5.8653e-2, 0.569070)
+#:
+#: The values below are **HLW v1 train**. They are overridable from the environment via
+#: ``HLW_TARGET_STATS`` so that a different training set (HLWv2) can supply its own
+#: without editing this file — see :func:`_load_target_stats`.
+_TARGET_STATS_V1: tuple[float, float, float, float] = (2.077e-4, 0.237300, 5.8653e-2, 0.569070)
+
+
+def _load_target_stats() -> tuple[tuple[float, float], tuple[float, float]]:
+    """Return ``(TARGET_MEAN, TARGET_STD)``, optionally overridden from the environment.
+
+    ``HLW_TARGET_STATS`` takes four comma-separated floats in the order
+    ``mean_theta,mean_rho,std_theta,std_rho``, exactly as ``hlw_target_stats`` prints
+    them. It exists because these constants are **training-set specific**: v1 and v2 have
+    different target distributions, and training v2 against v1's centre and scale is a
+    *silent* fault — the run converges perfectly well against a slightly wrong
+    normalisation, so nothing in the logs reveals it.
+
+    Defaulting to the v1 values keeps the completed v1 runs reproducible byte-for-byte.
+    """
+    raw = os.environ.get("HLW_TARGET_STATS", "").strip()
+    if not raw:
+        m_theta, m_rho, s_theta, s_rho = _TARGET_STATS_V1
+    else:
+        parts = [p for p in raw.replace(" ", "").split(",") if p]
+        if len(parts) != 4:
+            raise ValueError(
+                "HLW_TARGET_STATS needs 4 comma-separated floats "
+                f"(mean_theta,mean_rho,std_theta,std_rho), got {raw!r}"
+            )
+        m_theta, m_rho, s_theta, s_rho = (float(p) for p in parts)
+    if s_theta <= 0.0 or s_rho <= 0.0:
+        raise ValueError(
+            f"HLW_TARGET_STATS standard deviations must be > 0, got {s_theta}, {s_rho}"
+        )
+    return (m_theta, m_rho), (s_theta, s_rho)
+
+
+TARGET_MEAN, TARGET_STD = _load_target_stats()
 
 
 # --------------------------------------------------------------------------- #
@@ -319,17 +360,37 @@ def _key(name: str) -> str:
     return str(name).replace("\\", "/").lstrip("./")
 
 
+def _endpoints_from_row(row: list[str]) -> tuple[float, float, float, float] | None:
+    """The four endpoint columns of one ``metadata.csv`` row, for **both** HLW layouts.
+
+    HLW **v1** rows are ``filename, x1, y1, x2, y2`` (5 columns); HLW **v2** rows carry
+    the image dimensions first — ``filename, width, height, x1, y1, x2, y2`` (7 columns).
+    Slicing ``row[1:5]`` unconditionally therefore reads ``(width, height, x1, y1)`` on v2
+    and drops ``y2`` entirely. That is a **silent** fault of exactly the kind this task is
+    full of: the run converges perfectly well against a meaningless target. Measured on
+    v2 train, the bad parse gives ``theta`` mean **-40.8 deg** against v1's **0.01 deg** —
+    an average 40-degree horizon tilt, which is how it was caught.
+
+    The column count is the only thing that distinguishes the two layouts, so discriminate
+    on it. Returns ``None`` for a header row, which the callers skip.
+    """
+    cols = row[3:7] if len(row) >= 7 else row[1:5]
+    try:
+        return tuple(float(v) for v in cols)  # type: ignore[return-value]
+    except ValueError:      # header row
+        return None
+
+
 def _read_metadata(path: Path) -> dict[str, tuple[float, float, float, float]]:
     out: dict[str, tuple[float, float, float, float]] = {}
     with open(path, newline="") as fh:
         for row in csv.reader(fh):
             if len(row) < 5:
                 continue
-            try:
-                vals = tuple(float(v) for v in row[1:5])
-            except ValueError:      # header row
+            vals = _endpoints_from_row(row)
+            if vals is None:
                 continue
-            out[_key(row[0])] = vals  # type: ignore[assignment]
+            out[_key(row[0])] = vals
     return out
 
 
