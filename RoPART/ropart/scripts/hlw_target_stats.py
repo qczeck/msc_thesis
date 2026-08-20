@@ -27,7 +27,9 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import csv
 import math
+from pathlib import Path
 
 import torch
 from PIL import Image
@@ -35,13 +37,49 @@ from PIL import Image
 from ropart.hlw import HLWDataset, horizon_auc, horizon_error
 
 
-def _targets(ds: HLWDataset, limit: int = 0) -> torch.Tensor:
-    """``[N, 2]`` of ``(theta, rho)`` for every image in ``ds``, without decoding pixels."""
+def _dims_from_metadata(root) -> dict[str, tuple[int, int]]:
+    """``{key: (w, h)}`` from a **v2** ``metadata.csv``, which stores the dimensions.
+
+    HLW v2 rows are ``filename, width, height, x1, y1, x2, y2``, so the image sizes the
+    targets need are already in the CSV and no file has to be touched at all. On this NFS
+    a header read costs ~13 ms, so the header path spends ~3 h on the 96,617-image v2
+    train split; this reads one file in seconds.
+
+    Only v2 (7-column) rows carry dimensions — a v1 root returns an empty mapping and the
+    caller must fall back to headers.
+    """
+    from ropart.hlw import _key           # local: keeps the import surface of this script small
+    out: dict[str, tuple[int, int]] = {}
+    with open(Path(root) / "metadata.csv", newline="") as fh:
+        for row in csv.reader(fh):
+            if len(row) < 7:
+                continue
+            try:
+                w, h = int(float(row[1])), int(float(row[2]))
+            except ValueError:             # header row
+                continue
+            out[_key(row[0])] = (w, h)
+    return out
+
+
+def _targets(ds: HLWDataset, limit: int = 0, dims: dict | None = None) -> torch.Tensor:
+    """``[N, 2]`` of ``(theta, rho)`` for every image in ``ds``, without decoding pixels.
+
+    ``dims`` optionally supplies ``(w, h)`` per image so no file is opened at all — see
+    :func:`_dims_from_metadata`. ``theta`` and ``rho`` are invariant to a uniform resize
+    (``rho`` is in image heights), so the statistics are the same whether they are taken
+    on the raw root with raw dimensions or on the preprocessed root with preprocessed
+    ones, up to the sub-pixel rounding the round-trip check bounds at 1.4e-3 image heights.
+    """
+    from ropart.hlw import _key
     names = ds.names[:limit] if limit else ds.names
     out = []
     for k, name in enumerate(names):
-        with Image.open(ds.root / "images" / name) as im:
-            w, h = im.size          # header only; no decode
+        if dims is not None:
+            w, h = dims[_key(name)]
+        else:
+            with Image.open(ds.root / "images" / name) as im:
+                w, h = im.size      # header only; no decode
         out.append(ds.target_for(name, w, h))
         if (k + 1) % 5000 == 0:
             print(f"  {k + 1:,}/{len(names):,}", flush=True)
@@ -64,14 +102,26 @@ def main() -> None:
     p.add_argument("--eval", default="val", help="split the floor is evaluated on")
     p.add_argument("--size", type=int, default=224)
     p.add_argument("--limit", type=int, default=0, help="cap images per split (smoke test)")
+    p.add_argument("--dims-from-metadata", action="store_true",
+                   help="take (w, h) from a v2 metadata.csv instead of image headers "
+                        "(instant; requires the 7-column v2 layout, so point --root at "
+                        "the raw v2 root)")
     a = p.parse_args()
 
     fit_ds = HLWDataset(a.root, a.fit, a.size, train=False)
     ev_ds = HLWDataset(a.root, a.eval, a.size, train=False)
     print(f"fit on {a.fit}: {len(fit_ds):,} images   eval on {a.eval}: {len(ev_ds):,}\n")
 
-    fit = _targets(fit_ds, a.limit)
-    ev = _targets(ev_ds, a.limit)
+    dims = None
+    if a.dims_from_metadata:
+        dims = _dims_from_metadata(a.root)
+        if not dims:
+            raise SystemExit(f"--dims-from-metadata: {a.root}/metadata.csv has no "
+                             f"7-column (v2) rows, so it carries no image dimensions")
+        print(f"dimensions from metadata.csv: {len(dims):,} rows (no image headers read)\n")
+
+    fit = _targets(fit_ds, a.limit, dims)
+    ev = _targets(ev_ds, a.limit, dims)
 
     print(f"--- target distribution ({a.fit}) ---")
     _describe(fit[:, 0], "theta", 180.0 / math.pi, "(degrees)")
