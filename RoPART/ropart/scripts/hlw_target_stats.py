@@ -91,6 +91,12 @@ def main() -> None:
     print(f"\n--- constants for ropart/hlw.py (fit split = {a.fit}) ---")
     print(f"TARGET_MEAN: tuple[float, float] = ({float(mu_fit[0]):.4e}, {float(mu_fit[1]):.6f})")
     print(f"TARGET_STD: tuple[float, float] = ({s_theta:.4e}, {s_rho:.6f})")
+    # Same numbers in the form ropart.hlw reads from the environment, so a second training
+    # set needs no source edit and no hand-transcription (mis-typing one digit here is
+    # exactly the silent fault the override exists to avoid).
+    print("\n--- or, without editing the source (HLWv2 etc.) ---")
+    print(f"export HLW_TARGET_STATS={float(mu_fit[0]):.4e},{float(mu_fit[1]):.6f},"
+          f"{s_theta:.4e},{s_rho:.6f}")
 
     # Constant predictor: the training mean, which is the best constant under L2.
     mu = fit.mean(dim=0)

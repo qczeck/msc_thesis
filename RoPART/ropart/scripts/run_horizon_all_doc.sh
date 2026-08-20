@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Run the remaining HLW horizon arms back-to-back on ONE box, unattended.
 #
-#   usage: run_horizon_all_doc.sh [arm ...]        # default: ch2 w30 w90
+#   usage: run_horizon_all_doc.sh [arm ...] [-- <extra args for run_horizon_doc.sh>]
+#          default arms: ch2 w30 w90
+#
+# Everything after `--` is forwarded verbatim to each run_horizon_doc.sh invocation, which
+# is what makes a second dataset runnable without editing this file. For HLWv2:
+#
+#   HLW_ROOT=/vol/bitbucket/msk123/hlwv2/hlw224 MAX_WAIT=28800 \
+#     bash ropart/scripts/run_horizon_all_doc.sh base ch2 w30 w90 -- --tag v2
+#
+# ⚠ The `--tag` is not optional there. Without it OUT_NAME resolves to the *completed v1*
+# directory hlw_ft_<arm>_p32, whose checkpoint run_horizon_doc.sh would then auto-resume —
+# yielding a "finished" run that never saw the v2 data, with nothing in the log to say so.
 #
 # Why serially on one box rather than in parallel across three. All four arms must share
 # hardware *and* batch size, or a between-arm gap could be numerics or throughput rather
@@ -27,13 +38,22 @@
 
 set -u
 
-ARMS=("$@")
+# Split "arms -- extra args" into the two lists.
+ARMS=()
+EXTRA=()
+seen_sep=0
+for a in "$@"; do
+  if [ "$seen_sep" = "0" ] && [ "$a" = "--" ]; then seen_sep=1; continue; fi
+  if [ "$seen_sep" = "1" ]; then EXTRA+=("$a"); else ARMS+=("$a"); fi
+done
 [ ${#ARMS[@]} -eq 0 ] && ARMS=(ch2 w30 w90)
 
 REPO="${REPO:-${HOME}/msc_thesis/RoPART}"
 POLL=60
-# A finetune arm is ~35 min; nothing legitimately takes 4 h, so that is the stuck-job cap.
-MAX_WAIT=14400
+# Stuck-job cap. A v1 arm is ~35 min, so 4 h is a generous default — but a v2 arm is
+# ~3.3 h (5.7x the training images), which would leave almost no headroom, so raise it
+# via the environment for v2: MAX_WAIT=28800.
+MAX_WAIT="${MAX_WAIT:-14400}"
 
 log() { echo "[all] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 
@@ -53,13 +73,13 @@ wait_idle() {
 }
 
 cd "$REPO" || { log "FATAL: no repo at $REPO"; exit 2; }
-log "host=$(hostname -s) arms=${ARMS[*]}"
+log "host=$(hostname -s) arms=${ARMS[*]} extra=${EXTRA[*]-} hlw_root=${HLW_ROOT:-<default>} max_wait=${MAX_WAIT}"
 
 for arm in "${ARMS[@]}"; do
   log "waiting for the GPU to go idle before launching '$arm'"
   wait_idle || exit 1
   log "launching '$arm'"
-  if ! bash ropart/scripts/run_horizon_doc.sh "$arm"; then
+  if ! bash ropart/scripts/run_horizon_doc.sh "$arm" ${EXTRA[@]+"${EXTRA[@]}"}; then
     log "FATAL: launcher failed for '$arm' — stopping rather than skipping"
     exit 1
   fi

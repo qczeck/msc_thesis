@@ -496,6 +496,13 @@ def run_finetune(args, device):
     if args.finetune_task == "horizon":
         train_ds, val_ds = build_hlw_datasets(args.data_path, img_size=cfg_img)
         run_epoch, metric_key = horizon_run_epoch, "auc"
+        # The target standardisation is training-set specific and may be supplied via
+        # HLW_TARGET_STATS (see ropart.hlw). Record what this run actually used: a run
+        # resumed on a box where that variable was not exported would silently continue
+        # against a different centre and scale, and nothing else in the log would show it.
+        from ropart.hlw import TARGET_MEAN, TARGET_STD
+        print(f"hlw data: {args.data_path}")
+        print(f"hlw target_mean: {TARGET_MEAN} target_std: {TARGET_STD}")
         # Printed alongside `auc` in run.log. Not cosmetic: the AUC is structurally
         # dominated by rho (~26x — see horizon_run_epoch), so theta_mae is the number
         # the orientation claim actually rests on. W&B receives every key, but W&B is
