@@ -256,6 +256,77 @@ def test_paired_bootstrap_recovers_a_known_shift():
     print("OK paired bootstrap covers a planted shift and rejects a null one")
 
 
+def test_run_dir_matches_the_shell_naming_rule():
+    """The seed->directory rule is duplicated from ``run_horizon_doc.sh``; pin it.
+
+    Seed 0 keeps the unsuffixed name (so the 2026-08-20 runs stay addressable) and every
+    other seed gets ``_s<N>``, with ``--tag`` appended last. If the shell script's naming
+    ever changes and this is not changed with it, the analysis silently reads the wrong
+    directories — or, worse, finds seed 0's files for every seed.
+    """
+    from ropart.scripts.seed_replication_test import run_dir
+
+    assert run_dir("/o", "base", 0, "v2").name == "hlw_ft_base_p32_v2"
+    assert run_dir("/o", "base", 3, "v2").name == "hlw_ft_base_p32_s3_v2"
+    assert run_dir("/o", "w30", 0, "").name == "hlw_ft_w30_p32"
+    assert run_dir("/o", "w30", 1, "").name == "hlw_ft_w30_p32_s1"
+    print("OK run_dir matches the shell naming rule")
+
+
+def test_between_seed_interval_recovers_a_planted_shift():
+    """The primary statistic must find a real shift and reject a null one."""
+    import csv as _csv
+    import tempfile
+
+    import numpy as np
+
+    from ropart.scripts.seed_replication_test import (
+        per_seed_differences,
+        run_dir,
+        t_critical_975,
+    )
+
+    # Hand-checkable: the 4 df two-sided 95% t is 2.776.
+    assert abs(t_critical_975(4) - 2.776) < 1e-9
+    assert abs(t_critical_975(999) - 1.960) < 1e-9
+
+    rng = np.random.default_rng(0)
+    names = [f"img{i}.jpg" for i in range(200)]
+    seeds = [0, 1, 2, 3, 4]
+
+    def write(root, arm, seed, vals):
+        d = run_dir(root, arm, seed, "v2")
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "scores_test.csv", "w", newline="") as fh:
+            w = _csv.writer(fh)
+            w.writerow(["filename", "theta_err_deg", "rho_err", "horizon_err"])
+            for n, v in zip(names, vals):
+                w.writerow([n, f"{v:.8f}", "0", "0"])
+
+    with tempfile.TemporaryDirectory() as root:
+        for s in seeds:
+            base = rng.gamma(2.0, 0.5, size=200)          # non-negative, heavy-tailed
+            write(root, "base", s, base)
+            write(root, "good", s, base - 0.10)           # a clean -0.10 shift every seed
+            write(root, "null", s, base + rng.normal(0, 0.01, size=200))
+
+        means, diffs = per_seed_differences(root, "base", "good", seeds, "v2",
+                                            "test", "theta_err_deg")
+        assert len(means) == 5 and len(diffs) == 5
+        assert all(abs(m + 0.10) < 1e-9 for m in means), means   # exact: constant shift
+        sd = float(np.std(means, ddof=1))
+        ci_hi = float(np.mean(means)) + t_critical_975(4) * sd / 5 ** 0.5
+        assert ci_hi < 0, ci_hi                                   # excludes zero
+
+        means_null, _ = per_seed_differences(root, "base", "null", seeds, "v2",
+                                             "test", "theta_err_deg")
+        sd_null = float(np.std(means_null, ddof=1))
+        lo = float(np.mean(means_null)) - t_critical_975(4) * sd_null / 5 ** 0.5
+        hi = float(np.mean(means_null)) + t_critical_975(4) * sd_null / 5 ** 0.5
+        assert lo < 0 < hi, (lo, hi)                              # includes zero
+    print("OK between-seed interval finds a planted shift and rejects a null one")
+
+
 if __name__ == "__main__":
     test_horizontal_line_through_centre()
     test_offset_line()
@@ -271,4 +342,6 @@ if __name__ == "__main__":
     test_per_image_errors_reproduce_the_aggregates()
     test_wilcoxon_against_hand_computable_cases()
     test_paired_bootstrap_recovers_a_known_shift()
+    test_run_dir_matches_the_shell_naming_rule()
+    test_between_seed_interval_recovers_a_planted_shift()
     print("\nALL HLW TESTS PASSED")
