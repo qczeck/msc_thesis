@@ -419,7 +419,8 @@ def build_hlw_datasets(root: str, *, img_size: int = 224, val_split: str = "val"
 
 def horizon_run_epoch(model, loader, device, *, optimizer=None, scaler=None,
                       amp_dtype: torch.dtype = torch.float16,
-                      max_steps: int | None = None) -> dict[str, float]:
+                      max_steps: int | None = None,
+                      per_image: bool = False) -> dict[str, float | torch.Tensor]:
     """One horizon-regression epoch (train if ``optimizer`` given, else eval).
 
     Mirrors :func:`ropart.engine.cls_run_epoch` so the finetune loop is identical
@@ -438,11 +439,24 @@ def horizon_run_epoch(model, loader, device, *, optimizer=None, scaler=None,
     outweighs theta by ~26x. Since theta is the in-plane orientation channel the whole
     task was chosen to probe, **``theta_mae`` is the headline for the orientation claim**
     and ``auc`` is reported for comparability with the published protocol.
+
+    Args:
+        per_image: also retain the **per-sample** errors, returned under the keys
+            ``theta_err`` (degrees), ``rho_err`` and ``horizon_err`` as 1-D tensors in
+            loader order. Off by default so the training loop is unchanged. Needed for
+            a *paired* comparison between arms: the aggregate MAEs alone only support an
+            unpaired test, which on this task is far weaker — the arms are scored on the
+            same images and their errors are strongly correlated, so the shared component
+            cancels once the comparison is done per image. ``theta_err`` and ``rho_err``
+            average exactly to the reported ``theta_mae`` / ``rho_mae``; ``horizon_err``
+            is the quantity :func:`horizon_auc` consumes.
     """
     train = optimizer is not None
     model.train(train)
     meters = _Meters()
     errs: list[torch.Tensor] = []
+    per_theta: list[torch.Tensor] = []
+    per_rho: list[torch.Tensor] = []
     grad_ctx = torch.enable_grad() if train else torch.no_grad()
     t_mean = torch.tensor(TARGET_MEAN, device=device, dtype=torch.float32)
     t_std = torch.tensor(TARGET_STD, device=device, dtype=torch.float32)
@@ -475,12 +489,21 @@ def horizon_run_epoch(model, loader, device, *, optimizer=None, scaler=None,
                 # Square crop, so W/H == 1 in the network's frame.
                 e = horizon_error(p[:, 0], p[:, 1], t[:, 0], t[:, 1], 1.0)
                 errs.append(e.detach().cpu())
+                d_theta = (p[:, 0] - t[:, 0]).abs()
+                d_rho = (p[:, 1] - t[:, 1]).abs()
+                if per_image:
+                    per_theta.append(d_theta.detach().cpu() * 180.0 / math.pi)
+                    per_rho.append(d_rho.detach().cpu())
                 meters.update(bs, loss=loss.item(),
-                              theta_mae=float((p[:, 0] - t[:, 0]).abs().mean()) * 180.0 / math.pi,
-                              rho_mae=float((p[:, 1] - t[:, 1]).abs().mean()))
+                              theta_mae=float(d_theta.mean()) * 180.0 / math.pi,
+                              rho_mae=float(d_rho.mean()))
 
     out = meters.summary()
     out["auc"] = horizon_auc(torch.cat(errs)) if errs else 0.0
+    if per_image:
+        out["theta_err"] = torch.cat(per_theta) if per_theta else torch.empty(0)
+        out["rho_err"] = torch.cat(per_rho) if per_rho else torch.empty(0)
+        out["horizon_err"] = torch.cat(errs) if errs else torch.empty(0)
     return out
 
 

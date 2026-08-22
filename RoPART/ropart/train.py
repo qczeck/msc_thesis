@@ -494,14 +494,15 @@ def run_finetune(args, device):
     print(f"params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable")
 
     if args.finetune_task == "horizon":
-        train_ds, val_ds = build_hlw_datasets(args.data_path, img_size=cfg_img)
+        train_ds, val_ds = build_hlw_datasets(args.data_path, img_size=cfg_img,
+                                              val_split=args.hlw_val_split)
         run_epoch, metric_key = horizon_run_epoch, "auc"
         # The target standardisation is training-set specific and may be supplied via
         # HLW_TARGET_STATS (see ropart.hlw). Record what this run actually used: a run
         # resumed on a box where that variable was not exported would silently continue
         # against a different centre and scale, and nothing else in the log would show it.
         from ropart.hlw import TARGET_MEAN, TARGET_STD
-        print(f"hlw data: {args.data_path}")
+        print(f"hlw data: {args.data_path} val_split: {args.hlw_val_split}")
         print(f"hlw target_mean: {TARGET_MEAN} target_std: {TARGET_STD}")
         # Printed alongside `auc` in run.log. Not cosmetic: the AUC is structurally
         # dominated by rho (~26x — see horizon_run_epoch), so theta_mae is the number
@@ -736,6 +737,13 @@ def get_args():
                    help="'classify' (default): top-1 on CIFAR-100/ImageNet-100. "
                         "'horizon': HLW horizon-line regression, the orientation-sensitive "
                         "task; predicts (theta, rho) and scores AUC of horizon error")
+    p.add_argument("--hlw-val-split", default="val", choices=["val", "test"],
+                   help="HLW split to evaluate on. Default 'val'. 'test' is the 2,018-image "
+                        "held-out set and is reserved for the single final scoring run — "
+                        "validating on it per epoch would make 'best epoch' a selection "
+                        "over 100 test evaluations, i.e. test-set peeking. Prefer "
+                        "ropart.scripts.score_horizon, which scores a finished checkpoint "
+                        "without retraining")
     p.add_argument("--init-from", default="",
                    help="pretrain checkpoint to seed a finetune from. Deliberately NOT "
                         "--resume: the cluster env script auto-resumes a dead job by "

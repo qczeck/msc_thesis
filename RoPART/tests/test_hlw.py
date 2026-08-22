@@ -156,20 +156,6 @@ def test_horizon_epoch_runs_on_a_model():
     print(f"OK horizon_run_epoch trains and evals (auc={ev['auc']:.3f})")
 
 
-if __name__ == "__main__":
-    test_horizontal_line_through_centre()
-    test_offset_line()
-    test_endpoint_order_is_irrelevant()
-    test_theta_rho_lr_roundtrip()
-    test_crop_moves_the_horizon()
-    test_resize_is_scale_invariant()
-    test_horizon_error_is_zero_on_exact()
-    test_horizon_error_pure_offset()
-    test_auc_bounds()
-    test_horizon_epoch_runs_on_a_model()
-    print("\nALL HLW TESTS PASSED")
-
-
 def test_metadata_row_layouts_v1_and_v2():
     """Both HLW ``metadata.csv`` layouts must yield the same four endpoint columns.
 
@@ -184,3 +170,105 @@ def test_metadata_row_layouts_v1_and_v2():
     assert _endpoints_from_row(v1) == expected
     assert _endpoints_from_row(v2) == expected
     assert _endpoints_from_row(["filename", "x1", "y1", "x2", "y2"]) is None
+
+
+def test_per_image_errors_reproduce_the_aggregates():
+    """``per_image=True`` must average exactly to the reported theta_mae / rho_mae.
+
+    The paired test in ``ropart.scripts.paired_horizon_test`` differences these arrays
+    per image, so if they were a *different* quantity from the headline MAE the paired
+    interval would be an interval on something nobody reports. This ties the two
+    together. ``horizon_err`` must likewise be what the AUC is computed from.
+    """
+    from ropart.hlw import horizon_auc, horizon_run_epoch
+    from ropart.model import RoPARTViT, model_config
+
+    torch.manual_seed(0)
+    cfg = model_config("deit_small_patch4_32")
+    model = RoPARTViT(**cfg, num_classes=2, num_channels=2, mask_prob=0.0)
+    model.head = torch.nn.Identity()
+    x = torch.randn(10, 3, 32, 32)
+    y = torch.stack([torch.empty(10).uniform_(-0.3, 0.3),
+                     torch.empty(10).uniform_(-0.5, 0.5)], dim=1)
+    # Deliberately ragged batches: a per-sample array must not depend on batching, while
+    # the batch-weighted meter would only agree with it if the weighting is right.
+    loader = [(x[:4], y[:4]), (x[4:], y[4:])]
+    dev = torch.device("cpu")
+
+    ev = horizon_run_epoch(model, loader, dev, per_image=True)
+    assert len(ev["theta_err"]) == 10 and len(ev["rho_err"]) == 10
+    assert len(ev["horizon_err"]) == 10
+    assert abs(float(ev["theta_err"].mean()) - ev["theta_mae"]) < 1e-4
+    assert abs(float(ev["rho_err"].mean()) - ev["rho_mae"]) < 1e-6
+    assert abs(horizon_auc(ev["horizon_err"]) - ev["auc"]) < 1e-9
+    assert (ev["theta_err"] >= 0).all() and (ev["rho_err"] >= 0).all()
+
+    # The default path must be untouched: no extra keys, same aggregates.
+    plain = horizon_run_epoch(model, loader, dev)
+    assert "theta_err" not in plain and "horizon_err" not in plain
+    assert abs(plain["theta_mae"] - ev["theta_mae"]) < 1e-6
+    print("OK per-image errors average to the reported MAEs")
+
+
+def test_wilcoxon_against_hand_computable_cases():
+    """The signed-rank statistic, on cases small enough to check by hand."""
+    import numpy as np
+
+    from ropart.scripts.paired_horizon_test import wilcoxon_signed_rank
+
+    # Perfectly symmetric differences: W sits exactly at its null mean, so z = 0.
+    z, p = wilcoxon_signed_rank(np.array([1.0, -1.0, 2.0, -2.0]))
+    assert abs(z) < 1e-12, z
+    assert p > 0.99, p
+
+    # All differences positive: W takes its maximum, n(n+1)/2 = 55 against a mean of
+    # 27.5 and variance 96.25, so z = 27.5 / sqrt(96.25) = 2.803.
+    z, p = wilcoxon_signed_rank(np.arange(1.0, 11.0))
+    assert abs(z - 27.5 / math.sqrt(96.25)) < 1e-9, z
+    assert p < 0.01, p
+
+    # Zeros are dropped, not ranked — otherwise they would dilute the statistic.
+    z_with, _ = wilcoxon_signed_rank(np.array([0.0, 0.0, 1.0, 2.0, 3.0]))
+    z_without, _ = wilcoxon_signed_rank(np.array([1.0, 2.0, 3.0]))
+    assert abs(z_with - z_without) < 1e-12
+
+    # An empty (or all-zero) input is a no-difference result, not a crash.
+    assert wilcoxon_signed_rank(np.array([0.0, 0.0])) == (0.0, 1.0)
+    print("OK Wilcoxon signed-rank matches hand-computed cases")
+
+
+def test_paired_bootstrap_recovers_a_known_shift():
+    """The bootstrap CI must cover a planted shift and exclude zero when it should."""
+    import numpy as np
+
+    from ropart.scripts.paired_horizon_test import paired_bootstrap
+
+    rng = np.random.default_rng(0)
+    diff = rng.normal(-0.5, 1.0, size=2000)
+    lo, hi = paired_bootstrap(diff, 2000, 0.05, np.random.default_rng(1))
+    assert lo < diff.mean() < hi, (lo, diff.mean(), hi)
+    assert hi < 0.0, (lo, hi)          # a real shift: the interval excludes zero
+
+    # No shift at all: the interval must straddle zero.
+    lo, hi = paired_bootstrap(rng.normal(0.0, 1.0, size=2000), 2000, 0.05,
+                              np.random.default_rng(2))
+    assert lo < 0.0 < hi, (lo, hi)
+    print("OK paired bootstrap covers a planted shift and rejects a null one")
+
+
+if __name__ == "__main__":
+    test_horizontal_line_through_centre()
+    test_offset_line()
+    test_endpoint_order_is_irrelevant()
+    test_theta_rho_lr_roundtrip()
+    test_crop_moves_the_horizon()
+    test_resize_is_scale_invariant()
+    test_horizon_error_is_zero_on_exact()
+    test_horizon_error_pure_offset()
+    test_auc_bounds()
+    test_horizon_epoch_runs_on_a_model()
+    test_metadata_row_layouts_v1_and_v2()
+    test_per_image_errors_reproduce_the_aggregates()
+    test_wilcoxon_against_hand_computable_cases()
+    test_paired_bootstrap_recovers_a_known_shift()
+    print("\nALL HLW TESTS PASSED")
