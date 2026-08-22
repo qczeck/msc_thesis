@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import re
 import socket
@@ -234,7 +235,21 @@ class WandbRun:
 
 
 def save_checkpoint(path: Path, model, optimizer, epoch, args, extra: dict):
+    """Write a checkpoint **atomically** — temp file in the same directory, then rename.
+
+    A bare ``torch.save`` to the destination is not crash-safe: these checkpoints are
+    ~1 GB and are rewritten every epoch, so a box lost mid-write leaves a **truncated**
+    ``checkpoint.pth``. That is worse than losing the epoch, because the auto-resume path
+    in ``run_horizon_doc.sh`` keys on the file *existing* — the run would come back up and
+    die on a corrupt load, or, over a long chain, burn its retries on it. ``os.replace`` is
+    atomic within a filesystem, so the destination is only ever the previous good
+    checkpoint or the complete new one.
+
+    Same reasoning, and the same fix, as the atomic writes in
+    ``ropart/scripts/preprocess_hlw.py``.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
     torch.save(
         {
             "model": model.state_dict(),
@@ -243,8 +258,9 @@ def save_checkpoint(path: Path, model, optimizer, epoch, args, extra: dict):
             "args": vars(args),
             **extra,
         },
-        path,
+        tmp,
     )
+    os.replace(tmp, path)
 
 
 # --------------------------------------------------------------------------- #
