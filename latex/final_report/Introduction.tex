@@ -1,0 +1,34 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+
+\begin{document}
+\ourchapter{Introduction}\label{ch:introduction}
+
+\section{Geometry as supervision}\label{sec:geometry-as-supervision}
+\stub{Why predicting where things are is a useful pretext task, and how the
+position-prediction family arrived at PART. Establishes the premise the whole
+report rests on: the geometry is the supervision, so the encoder is never given
+position embeddings.}
+
+\section{Problem statement: from translation to \texorpdfstring{\SEtwo}{SE(2)}}\label{sec:problem-statement}
+\stub{PART supervises relative translation \dxy{} between off-grid patch pairs.
+Relative orientation \dphi{} is the missing generator that takes the pretext task
+from the translation subgroup to planar rigid motion. States the research question:
+does supervising \dphi{} yield representations with better orientation-sensitive
+downstream performance, without degrading classification?}
+
+\section{Objectives and scope}\label{sec:objectives-and-scope}
+\stub{What this project set out to deliver, and what was deliberately excluded ---
+ImageNet-1K pretraining and architecturally equivariant heads. Notes that the
+rotation work is flag-gated so the translation-only baseline path is unchanged.}
+
+\tocsubsectionstar{Contributions}
+\stub{Numbered list of the contributions, each one sentence, each pointing at the
+chapter that substantiates it.}
+
+\tocsubsectionstar{Outline}
+\stub{One sentence per chapter. Closes with a pointer to the Declarations for the
+ethical position.}
+
+\ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
+\end{document}

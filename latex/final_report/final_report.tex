@@ -1,0 +1,250 @@
+% !TEX TS-program = pdflatexmk
+% !TEX encoding = UTF-8 Unicode
+% !BIB program = biber
+% !TeX spellcheck = en_GB
+% =====================================================================
+%  RoPART --- MSc Computing Individual Project (70081), final report.
+%  Maciej Kuczek, Imperial College London, Department of Computing.
+%
+%  Build:  make          (latexmk + biber; no -shell-escape needed)
+%          make clean
+%  In TeXShop, just press Typeset (Cmd-T): the TS-program comment above
+%  selects the pdflatexmk engine, which drives latexmk --- so it reruns
+%  until the references settle and calls biber itself. Biber, not BibTeX:
+%  biblatex cannot be processed by BibTeX.
+%
+%  NB if you ever go back to TeXstudio, delete the TS-program line: it
+%  only accepts a bare engine name (pdflatex/xelatex/...) there, and on
+%  rejecting it runs `latexmk` with no arguments, which builds every .tex
+%  in this folder rather than just the report.
+%
+%  House rules for this document:
+%   * UK English throughout (babel `british`).
+%   * Vancouver referencing, numbered in order of first appearance
+%     (biblatex `vancouver` style, backend biber, sorting=none).
+%   * 2.5cm margins, 11pt --- the departmental minimum.
+%   * 60 A4 pages of content maximum (chapters only; the title pages,
+%     contents, references, declarations, and appendices do not count).
+%     A 40-page report is usually the better report.
+% =====================================================================
+\documentclass[a4paper, 11pt]{report}
+
+\usepackage[margin=2.5cm,headheight=13.6pt]{geometry}
+\usepackage{setspace}
+\usepackage{xr-hyper}
+\usepackage{hyperref}
+\usepackage{bookmark} % must follow hyperref: fixes the TOC/bookmark level jumps
+\usepackage[british]{babel}
+\usepackage{fancyvrb}
+\usepackage[backend=biber,style=vancouver,sorting=none]{biblatex}
+\usepackage{float}
+\usepackage[tt=false, type1=true]{libertine}
+\usepackage[varqu]{zi4}
+\usepackage[libertine]{newtxmath}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{newunicodechar}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage[scaled=0.8, lining]{FiraMono}
+\usepackage{placeins}
+\usepackage{flafter}
+\usepackage{fancyhdr}
+\usepackage{cleveref}
+\usepackage{url}
+\usepackage{xurl}
+\usepackage[figurename=Fig.]{caption}
+\usepackage{subcaption}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{subfiles}
+\usepackage{titlesec}
+\usepackage{textcomp}
+\usepackage[autostyle]{csquotes}
+\usepackage[most]{tcolorbox}
+\usepackage{multirow}
+\usepackage{multicol}
+\usepackage{changepage}
+
+\graphicspath{{figures/}{images/}}
+
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{fillbetween}
+
+\setstretch{1} %was 1.15, which is more readable, but reduces your page count
+
+\definecolor[named]{ImperialBlue}{HTML}{003e74}
+\definecolor[named]{ForestGreen}{HTML}{009B55}
+\definecolor[named]{Mint}{HTML}{96DEC4}
+\definecolor[named]{DarkRed}{HTML}{A50000}
+\definecolor[named]{ACMPurple}{cmyk}{0.55,1,0,0.15}
+\definecolor[named]{ACMDarkBlue}{cmyk}{1,0.58,0,0.21}
+\hypersetup{colorlinks,
+    linkcolor=ACMPurple,
+    citecolor=ACMPurple,
+    urlcolor=ACMDarkBlue,
+    filecolor=ACMDarkBlue}
+
+% Code is set with `listings`, not `minted`: minted needs Pygments on PATH
+% and -shell-escape, which many editor build profiles do not provide. The
+% guidelines say source listings belong in the repo, not the report, so
+% syntax highlighting buys us little. Display code goes in `lstlisting`.
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{ImperialBlue}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{ForestGreen},
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  frame=none,
+  captionpos=b,
+  numberstyle=\tiny\color{gray},
+  language=Python,
+}
+
+%inline code: `\py{foo}` in the body, `\pyfoot{foo}` inside footnotes
+\newcommand{\py}[1]{\texttt{#1}}
+\newcommand{\pyfoot}[1]{{\footnotesize\texttt{#1}}}
+\newcommand{\shell}[1]{\texttt{#1}}
+
+\newcommand{\textttiny}[1]{{\small {\texttt{#1}}}}
+\newcommand{\textttinier}[1]{{\footnotesize {\texttt{#1}}}}
+
+% Renders a Chapter more like an "article part"
+\assignpagestyle{\chapter}{fancy}
+\titleformat{\chapter}[display]{}{\bfseries\Large \chaptertitlename \ \thechapter}{-5pt}{\bfseries\huge}
+\titlespacing*{\chapter}{0pt}{-30pt}{10pt}
+
+\pagestyle{fancy}
+\providecommand{\chaptertitle}{}
+\newcommand{\ourchapter}[1]{\pagebreak\chapter{#1}\renewcommand{\chaptertitle}{#1}}
+\newcommand{\ourchapterstar}[1]{\pagebreak\chapter*{#1}\renewcommand{\chaptertitle}{}}
+\newcommand{\apxsection}[1]{\chapter{#1}}
+\newcommand{\tocchapterstar}[1]{\chapter*{#1}\phantomsection\addcontentsline{toc}{chapter}{#1}}
+\newcommand{\tocsubsectionstar}[1]{\subsection*{#1}\phantomsection\addcontentsline{toc}{subsection}{#1}}
+\newcommand{\tocsubsubsectionstar}[1]{\subsubsection*{#1}\phantomsection\addcontentsline{toc}{subsubsection}{#1}}
+
+\newcommand{\maintitle}{RoPART: Relative Orientation in Off-Grid Self-Supervised Learning}
+% If you don't want a subtitle, set this to empty and remove the ":" in \lhead below
+\newcommand{\mainsubtitle}{\emph{Extending PART from Translation to Rigid Motion}}
+\newcommand{\shorttitle}{RoPART} % used in the running head, where the full title will not fit
+\newcommand{\you}{Maciej Kuczek}
+\newcommand{\supervisor}{Dr Josiah Wang}
+\newcommand{\secondmarker}{Dr Pancham Shukla}
+\newcommand{\degree}{Master of Science}
+\newcommand{\coursetitle}{MSc Computing - Individual Project (70081)}
+
+\lhead{\shorttitle: \mainsubtitle}
+\rhead{\textsc{\chaptertitle}}
+\lfoot{\you}
+\renewcommand{\footrulewidth}{0.4pt}
+
+\crefformat{chapter}{#2\textsc{chapter}~#1#3}
+\Crefformat{chapter}{#2\textsc{Chapter}~#1#3}
+\crefname{chapter}{chapter}{chapters}
+\Crefname{chapter}{Chapter}{Chapters}
+\crefname{figure}{fig.}{figs.}
+\Crefname{figure}{Fig.}{Figs.}
+\crefname{equation}{eq.}{eqs.}
+\Crefname{equation}{Eq.}{Eqs.}
+\crefformat{section}{#2\S#1#3}
+\Crefformat{section}{Section~#2#1#3}
+\crefformat{subsection}{#2\S#1#3}
+\Crefformat{subsection}{Section~#2#1#3}
+\crefformat{subsubsection}{#2\S#1#3}
+\Crefformat{subsubsection}{Section~#2#1#3}
+\newcommand{\creflastconjunction}{, and~}
+
+% --- project-specific shorthands -------------------------------------
+\newcommand{\dphi}{\ensuremath{\Delta\varphi}}
+\newcommand{\dx}{\ensuremath{\Delta x}}
+\newcommand{\dy}{\ensuremath{\Delta y}}
+\newcommand{\dxy}{\ensuremath{(\Delta x, \Delta y)}}
+\newcommand{\SEtwo}{\ensuremath{\mathrm{SE}(2)}}
+% ---------------------------------------------------------------------
+
+\makeatletter
+\patchcmd{\@addmarginpar}{\ifodd\c@page}{\ifodd\c@page\@tempcnta\m@ne}{}{}
+\makeatother
+\reversemarginpar
+\newcommand{\ponders}[3]{\marginpar{\tiny\itshape\raggedright\textcolor{#2}{\textbf{#1:} #3}}\ignorespaces}
+\marginparwidth=1.6cm \marginparsep=0cm
+\newcommand{\TODO}[1]{{\color{DarkRed}#1}}
+
+% Placeholder prose. Every \stub is a section that still has to be written;
+% delete the call as you replace it, and `grep -c '\\stub{' [A-Z]*.tex`
+% counts what is left. Deliberately grey and italic so it can never be mistaken for
+% real content in a draft PDF.
+\newcommand{\stub}[1]{{\color{gray!85!black}\itshape #1\par}}
+\newcommand{\svr}[1]{\ponders{Sup}{blue}{#1}} % supervisor's marginal notes
+\newcommand{\me}[1]{\ponders{Me}{DarkRed}{#1}}
+
+%fix for # and % inside footnotes for verbatim-ish material: must go below everything else!
+\makeatletter
+\let\footnote@orig\footnote
+\def\footnote{%
+  \begingroup
+  \@makeother\#%
+  \footnote@i
+}
+% added \long to accept multi-para footnotes
+\long\def\footnote@i#1{%
+  \endgroup
+  \footnote@orig{#1}%
+}
+\makeatother
+
+\addbibresource{references.bib}
+
+\begin{document}
+
+\pagenumbering{roman}
+
+\subfile{Titlepage}
+
+\setcounter{page}{1}
+\setcounter{tocdepth}{2}
+
+\ourchapterstar{Abstract}
+%TODO: abstract --- max one page, no citations, must stand alone.
+
+\ourchapterstar{Acknowledgements}
+% Optional, but it is usual to thank your supervisor.
+
+\pagebreak
+\tableofcontents
+%I don't *think* you need these
+%\pagebreak
+%\listoffigures
+%\listoftables
+
+\pagebreak
+\pagenumbering{arabic}
+
+\subfile{Introduction}%
+\subfile{Background}%
+\subfile{RoPART}%
+\subfile{Learning}%
+\subfile{MatchedBudget}%
+\subfile{Downstream}%
+\subfile{Conclusion}%
+
+\pagebreak
+\phantomsection
+\renewcommand{\chaptertitle}{References}
+\printbibliography[heading=bibintoc, title={References}]
+
+\subfile{Declarations}%
+
+\appendix
+\renewcommand{\chaptertitle}{}
+\subfile{Appendix}%
+
+\end{document}

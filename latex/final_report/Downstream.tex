@@ -1,0 +1,52 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+\setcounter{chapter}{5}
+
+\begin{document}
+\ourchapter{Downstream evaluation}\label{ch:downstream}
+
+\section{Protocol: end-to-end finetuning}\label{sec:finetune-protocol}
+\stub{The evaluation protocol and why it is a finetune rather than a linear probe:
+all four of the source paper's downstream results are finetunes, and a frozen probe
+would freeze exactly what the paper trains.}
+
+\section{Statistical protocol}\label{sec:statistical-protocol}
+\stub{Per-image pairing, bootstrap confidence intervals, Wilcoxon signed-rank tests,
+and the multiplicity correction. Why the analysis was pre-registered before the runs,
+and what pairing buys: an unpaired difference here is wider than every effect worth
+measuring.}
+
+\section{Classification on ImageNet-100}\label{sec:in100}
+\stub{The no-degradation check on a basic task. Rotated pixels cost accuracy;
+supervising \dphi{} pays most of it back, returning to parity with the baseline.}
+
+\section{The orientation-sensitive task}\label{sec:hlw-task}
+\stub{Horizon line estimation on HLW. The two prediction channels, and why one is
+in-plane orientation while the other is translation-like --- a specificity control
+built into the task rather than bolted on.}
+
+\section{Held-out results}\label{sec:hlw-results}
+\stub{The two significant deficits, and the RoPART advantage with its specificity
+control firing. Reported at the strength the evidence supports: the deficits are
+findings, the advantage is a positive signal awaiting a second seed.}
+
+\section{Why the published metric cannot see the effect}\label{sec:auc-blindness}
+\stub{The published AUC is dominated by the translation-like channel, so it is blind
+to the orientation effect and its arm ordering is unstable between splits. The case
+for headlining angular error instead.}
+
+\section{Data integrity}\label{sec:data-integrity}
+\stub{What was verified before the numbers were trusted, and the parsing bug that
+was caught by a constants check rather than by the results looking wrong.}
+
+\section{Synthesis}\label{sec:synthesis}
+\stub{The two downstream measurements against the pretext ordering. Pretext gate
+quality turns out not to be a proxy for downstream utility, which qualifies the
+range-cost result of \cref{ch:matched-budget}.}
+
+\section{Threats to validity revisited}\label{sec:threats-revisited}
+\stub{The interpolation confound and orientation recoverability, revisited against
+everything now measured --- what has been closed, and what remains open.}
+
+\ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
+\end{document}

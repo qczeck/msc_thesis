@@ -1,0 +1,40 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+\setcounter{chapter}{1}
+
+\begin{document}
+\ourchapter{Background and related work}\label{ch:background}
+
+\section{Self-supervised visual representation learning}\label{sec:ssl}
+\stub{The problem setting and the main families --- contrastive, masked
+reconstruction, and pretext-task methods --- with enough detail to place the
+position-prediction lineage inside it.}
+
+\section{The position-prediction lineage}\label{sec:position-prediction}
+\stub{Context prediction and jigsaw puzzles as the ancestors; MP3, DropPos and MAE
+as the modern absolute-position and masked-reconstruction methods. Evaluates each
+approach rather than merely listing it: what each supervises, and what that costs.}
+
+\section{PART in detail}\label{sec:part}
+\stub{The source paper's method. Off-grid continuous patch sampling, pairwise
+relative targets, the cross-attention relative encoder, and the absence of position
+embeddings. Includes the scale and aspect extension of Section~5.1(ii), which is the
+precedent for adding a channel group.}
+
+\section{Rotation in self-supervision}\label{sec:rotation-in-ssl}
+\stub{RotNet's discrete image-level rotation prediction, and why \emph{relative}
+orientation between patches is a different object. A short contrast with
+architecturally rotation-equivariant approaches: they impose invariance, whereas
+RoPART treats orientation as recoverable signal to be supervised.}
+
+\section{Orientation-sensitive tasks and their metrics}\label{sec:orientation-tasks}
+\stub{Horizon line estimation and head pose estimation --- what makes a task
+orientation-sensitive, and how each is scored. Motivates the choice of HLW and the
+decision to headline angular error rather than the published AUC.}
+
+\section{Positioning RoPART}\label{sec:positioning}
+\stub{The gap: PART names ``modelling rotations'' as open future work. States what
+RoPART adds and how it relates to everything above.}
+
+\ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
+\end{document}

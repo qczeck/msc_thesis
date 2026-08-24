@@ -1,0 +1,41 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+
+% A subfile rather than a plain \input, so that building this file on its
+% own succeeds (TeXstudio will happily compile whichever tab is focused).
+
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+    \vspace*{-13.5mm}\hspace{-30.6mm}\hspace{17.5mm}\includegraphics[width=.545\textwidth]{images/imperial-logo}
+    \vspace*{\fill}
+    \begin{center}
+        {\Huge{\maintitle}}\\[0.4cm]
+        {\Large{\mainsubtitle}}\\[1.2cm]
+        {\LARGE{\you}}\\[0.6cm]
+        {\large{\coursetitle}}\\[3.6cm]
+        \begin{minipage}{0.5\textwidth}
+            \begin{center}
+                \large
+                \emph{Supervisor:} \\
+                \supervisor
+            \end{center}
+        \end{minipage}%
+        \begin{minipage}{0.5\textwidth}
+            \begin{center}
+                \large
+                \emph{Second Marker:} \\
+                \secondmarker
+            \end{center}
+        \end{minipage}\\[4cm]
+        {\Large \today}\\[0cm]
+        \vspace*{\fill}
+        {\emph{A dissertation submitted in fulfilment of the requirements for\\ the degree of \degree{} in Computing}}\\[0.3cm]
+        {\emph{in the}}\\[0.4cm]
+        {\emph{Department of Computing}}\\
+        {\emph{Imperial College London}}\\
+    \end{center}
+\end{titlepage}
+\clearpage % end title page
+\hypersetup{pageanchor=true}
+\end{document}

@@ -1,0 +1,48 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+\setcounter{chapter}{3}
+
+\begin{document}
+\ourchapter{Does relative orientation learn?}\label{ch:learning}
+
+\stub{Chapter preamble: this chapter asks whether the \dphi{} signal exists at all,
+and whether an apparent positive is genuine relative orientation or the
+interpolation artefact. It is presented chronologically because the chronology is
+the argument --- each experiment was designed to close the previous one's threat to
+validity.}
+
+\section{The correctness gate}\label{sec:correctness-gate}
+\stub{The translation-only baseline reproducing PART's behaviour, with translational
+negative symmetry as the gate. Nothing that follows is interpretable without this.}
+
+\section{The first negative: raw rotation at \texorpdfstring{$P=4$}{P=4}}\label{sec:first-negative}
+\stub{Rotation pinned at the mean-predictor floor, and translation collapsing with
+it. The single-batch overfit harness separates task from wiring: the model fits
+memorisable labels, so the failure is recoverability, not a bug.}
+
+\section{Recoverability: \texorpdfstring{$P=8$}{P=8} and the quad probes}\label{sec:recoverability}
+\stub{More orientation-bearing content per patch barely moves rotation off chance.
+The discrete-quad probes, which are confound-free by construction, sit at floor too.}
+
+\section{Large patches unlock \texorpdfstring{\dphi}{the orientation channel}}\label{sec:p32-unlock}
+\stub{At \(P=32\), bounded \(\pm 30^\circ\) rotation learns and passes the intrinsic
+gates --- the first positive, and the point at which the confound stops being
+hypothetical.}
+
+\section{Adjudicating the interpolation confound}\label{sec:adjudication}
+\stub{Blur removal collapses the positive to floor on every channel. The extraction,
+statistics and gradients are all exonerated, so the collapse is read as a result:
+the signature was doing the work.}
+
+\section{The reversal: isolating optimisation drag}\label{sec:reversal}
+\stub{Down-weighting the rotation group separates \emph{signal absent} from
+\emph{optimisation collapsed}. With the drag controlled, blur-removed rotation
+learns identically to raw --- the signature verdict does not survive, and the
+positive is genuine.}
+
+\section{What the arc establishes}\label{sec:arc-establishes}
+\stub{The claim this chapter supports, stated no more strongly than the evidence
+allows, and the loose end that remains: signature removal is near-total, not total.}
+
+\ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
+\end{document}

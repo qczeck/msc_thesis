@@ -1,0 +1,54 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+\setcounter{chapter}{2}
+
+\begin{document}
+\ourchapter{RoPART: design and implementation}\label{ch:ropart}
+
+\section{The \texorpdfstring{\SEtwo}{SE(2)} target}\label{sec:se2-target}
+\stub{Extending the per-pair target from \dxy{} to \dxy{} plus \dphi{}, and the
+structural invariants it must satisfy: identity on the diagonal, symmetry in
+\(\cos\dphi\), antisymmetry in \(\sin\dphi\). Explains the build order --- one
+channel group at a time, simplest first --- so any downstream effect is attributable.}
+
+\section{Angle representation and loss}\label{sec:angle-representation}
+\stub{Why \((\cos\dphi, \sin\dphi)\) regression rather than a raw angle (the
+\(\pm\pi\) wrap) or discrete bins. The loss, and the \(w_\varphi\) group weighting
+that later turns out to matter more than expected.}
+
+\section{Patch position convention}\label{sec:position-convention}
+\stub{Centred versus corner anchors, and why the centre is the rotation-invariant
+choice that keeps translation decoupled from \dphi{}. Notes the reference-local
+frame as the deferred alternative.}
+
+\section{Rotating pixels}\label{sec:rotating-pixels}
+\stub{The crop--rotate--centre-crop--resize pipeline, which avoids empty corners.
+The two rotation sets: continuous bounded rotation, and the discrete quad set of
+exact \texttt{rot90} turns.}
+
+\section{Interpolation controls by construction}\label{sec:interpolation-controls}
+\stub{The resampling-blur signature correlated with \(\varphi\), and the control
+arms built to break it: raw, supersampled, and matched or randomised blur. Framed
+as a false-positive generator that any positive result must be tested against.}
+
+\section{The relative head}\label{sec:relative-head}
+\stub{The cross-attention relative encoder, the two query types, and the baseline
+that would not learn under the upstream default --- diagnosed with the single-batch
+overfit harness.}
+
+\section{Implementation}\label{sec:implementation}
+\stub{The \texttt{ropart} package: flag-gated diffs against the upstream path, the
+test suite, and device-agnostic execution across MPS and CUDA.}
+
+\section{Experimental infrastructure}\label{sec:infrastructure}
+\stub{Cluster execution, atomic checkpointing and supervised restart, experiment
+tracking, and what it takes to make a multi-day run survive a dead GPU box.}
+
+\section{Protocol and metrics}\label{sec:protocol-and-metrics}
+\stub{Datasets and model configurations. The mean-predictor floor and its
+derivation, the four intrinsic gates --- identity, negative symmetry, compositional
+consistency, translation --- and angular MAE. Every later result is quoted against
+these, so they are defined once, here.}
+
+\ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
+\end{document}
