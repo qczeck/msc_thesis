@@ -1,0 +1,98 @@
+% !TEX root = final_report.tex
+\documentclass[final_report.tex]{subfiles}
+\setcounter{chapter}{3}
+
+\begin{document}
+\ourchapter{Pretraining}\label{ch:pretraining}
+
+\stub{Chapter preamble: this chapter covers the pretext task end to end. It first
+asks whether the \dphi{} signal exists at all, and whether an apparent positive is
+genuine relative orientation or the interpolation artefact
+(\cref{sec:does-dphi-learn}); it then measures what the signal costs under
+controlled, budget-matched conditions, and produces the four converged encoders
+every downstream measurement in \cref{ch:downstream} is run on
+(\cref{sec:matched-budget}). The first half is presented chronologically because
+the chronology is the argument --- each experiment was designed to close the
+previous one's threat to validity --- and the second half is what that arc makes
+it legitimate to measure.}
+
+% =====================================================================
+\section{Does relative orientation learn?}\label{sec:does-dphi-learn}
+% =====================================================================
+
+\subsection{The correctness gate}\label{sec:correctness-gate}
+\stub{The translation-only baseline reproducing PART's behaviour, with translational
+negative symmetry as the gate. Nothing that follows is interpretable without this.}
+
+\subsection{The first negative: raw rotation at \texorpdfstring{$P=4$}{P=4}}\label{sec:first-negative}
+\stub{Rotation pinned at the mean-predictor floor, and translation collapsing with
+it. The single-batch overfit harness separates task from wiring: the model fits
+memorisable labels, so the failure is recoverability, not a bug.}
+
+\subsection{Recoverability: \texorpdfstring{$P=8$}{P=8} and the quad probes}\label{sec:recoverability}
+\stub{More orientation-bearing content per patch barely moves rotation off chance.
+The discrete-quad probes, which are confound-free by construction, sit at floor too.}
+
+\subsection{Large patches unlock \texorpdfstring{\dphi}{the orientation channel}}\label{sec:p32-unlock}
+\stub{At \(P=32\), bounded \(\pm 30^\circ\) rotation learns and passes the intrinsic
+gates --- the first positive, and the point at which the confound stops being
+hypothetical.}
+
+\subsection{Adjudicating the interpolation confound}\label{sec:adjudication}
+\stub{Blur removal collapses the positive to floor on every channel. The extraction,
+statistics and gradients are all exonerated, so the collapse is read as a result:
+the signature was doing the work.}
+
+\subsection{The reversal: isolating optimisation drag}\label{sec:reversal}
+\stub{Down-weighting the rotation group separates \emph{signal absent} from
+\emph{optimisation collapsed}. With the drag controlled, blur-removed rotation
+learns identically to raw --- the signature verdict does not survive, and the
+positive is genuine.}
+
+\subsection{What the arc establishes}\label{sec:arc-establishes}
+\stub{The claim this half of the chapter supports, stated no more strongly than the
+evidence allows, and the loose end that remains: signature removal is near-total,
+not total.}
+
+% =====================================================================
+\section{The matched-budget pretext study}\label{sec:matched-budget}
+% =====================================================================
+
+\stub{Section preamble: with the signal established, the remainder of the chapter
+measures what it costs under controlled conditions.}
+
+\subsection{Why matched budgets}\label{sec:why-matched-budgets}
+\stub{The convergence confound: an arm that is merely slower looks like an arm that
+is worse. The stand-down that followed, and what a matched budget has to rule out.}
+
+\subsection{Design: four arms, one factor per step}\label{sec:four-arms}
+\stub{Baseline, rotated pixels unsupervised, RoPART \(\pm 30^\circ\), RoPART
+\(\pm 90^\circ\). Each step changes exactly one thing, which is what makes a later
+downstream difference attributable to the \dphi{} target rather than to rotated
+patches acting as augmentation.}
+
+\subsection{Convergence and pretext performance}\label{sec:convergence}
+\stub{Training behaviour across the four arms at matched budget, and confirmation
+that each has converged rather than merely stopped.}
+
+\subsection{The cost of rotation range}\label{sec:range-cost}
+\stub{The intrinsic gates across \(\pm 30^\circ\) and \(\pm 90^\circ\). The gaps
+survive budget matching, so the graded degradation is a property of the task ---
+and, floor-normalised, the wider range is a trade rather than a failure.}
+
+\subsection{The pretext-level no-degradation check}\label{sec:no-degradation-pretext}
+\stub{Adding the \dphi{} target does not cost translation. States plainly that this
+is a pretext-level result, on the task family the encoder was trained on, and so
+does not settle the downstream question.}
+
+% =====================================================================
+\section{Discussion}\label{sec:pretraining-discussion}
+% =====================================================================
+\stub{What the arc and the four arms together can and cannot attribute: that the
+learned signal is genuine rather than the interpolation signature, which structural
+looseness tracks rotated pixels rather than the \dphi{} target itself, and why every
+claim here is pretext-level --- the downstream question is
+\cref{ch:downstream}'s.}
+
+\ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
+\end{document}

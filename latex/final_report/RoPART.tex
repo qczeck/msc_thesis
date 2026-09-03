@@ -15,6 +15,10 @@ channel group at a time, simplest first --- so any downstream effect is attribut
 \stub{Why \((\cos\dphi, \sin\dphi)\) regression rather than a raw angle (the
 \(\pm\pi\) wrap) or discrete bins. The loss, and the \(w_\varphi\) group weighting
 that later turns out to matter more than expected.}
+To represent rotation, a simple direct angle regression may be used. This is a poor neural target: an angle is a point on the unit circle, so any scalar parametrisation is discontinuous at the $\pm\pi$ wrap-around, where two near-identical orientations sit at opposite ends of the range. The network must then approximate a discontinuous function, which yields large gradients at the seam and penalises errors that reflect no real geometric difference; Zhou et al.~\cite{rotcont} show such discontinuous representations are harder to learn. Encoding the angle on the unit circle as $(\cos\Delta\varphi,\sin\Delta\varphi)$ removes the seam and is therefore a better target, supervised either by an MSE on the two components or by a cosine loss $1-\cos(\Delta\hat\varphi-\Delta\varphi)$. This representation also fixes how the intrinsic metrics are computed: the predicted angle is recovered from the network's $(\cos,\sin)$ outputs, the angular error is measured as the difference from the true angle wrapped around the circle into $(-\pi,\pi]$, and the negative-symmetry and compositional-consistency checks are likewise evaluated on the circle rather than on raw scalar differences.
+
+Predicting several relative quantities from a shared backbone is a multi-task regression. This means that channels with different units and convergence rate may interfere and a single fixed loss weighting may prove hard to tune and may not be optimal throughout training. Indeed, in PART~\cite{part} itself adding the relative scale and aspect ratio terms delayed the convergence of translation terms relative to the baseline. One established solution is to make the weighting adaptive. Kendall et al.~\cite{kendall} propose weighting each task by a learned homoscedastic uncertainty which automatically downweights noisier tasks.
+
 
 \section{Patch position convention}\label{sec:position-convention}
 \stub{Centred versus corner anchors, and why the centre is the rotation-invariant
@@ -49,6 +53,24 @@ tracking, and what it takes to make a multi-day run survive a dead GPU box.}
 derivation, the four intrinsic gates --- identity, negative symmetry, compositional
 consistency, translation --- and angular MAE. Every later result is quoted against
 these, so they are defined once, here.}
+\paragraph{Intrinsic metrics.} These characterise the orientation channel directly,
+computed on the unit circle to respect the $\pm\pi$ wrap-around:
+\begin{itemize}
+  \item \emph{Angular error} on $\Delta\varphi$, recovered from the predicted
+  $(\cos,\sin)$ outputs and wrapped into $(-\pi,\pi]$. The reference null is the
+  mean-predictor floor: for approximately uniform $\Delta\varphi$, predicting
+  $(0,0)$ gives a $(\cos,\sin)$ MSE of exactly $1.0$, so beating this floor by a
+  clear margin is the minimal evidence that anything is being learned.
+  \item \emph{Rotational negative symmetry}: predictions should satisfy
+  $\Delta\varphi(i\!\to\!j) = -\Delta\varphi(j\!\to\!i)$, the rotational analogue of
+  the translational symmetry already confirmed in Phase~0.
+  \item \emph{Compositional consistency}: relative orientations should compose
+  consistently around triples of patches.
+\end{itemize}
+A positive intrinsic result is angular error well below the mean-predictor floor with
+the symmetry and consistency invariants holding --- \emph{and}, critically, surviving
+a matched-interpolation control (the same resampling applied to $\varphi = 0$
+patches) rather than reflecting a resampling artefact.
 
 \ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
 \end{document}

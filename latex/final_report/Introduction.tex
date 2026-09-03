@@ -5,30 +5,59 @@
 \ourchapter{Introduction}\label{ch:introduction}
 
 \section{Geometry as supervision}\label{sec:geometry-as-supervision}
-\stub{Why predicting where things are is a useful pretext task, and how the
-position-prediction family arrived at PART. Establishes the premise the whole
-report rests on: the geometry is the supervision, so the encoder is never given
-position embeddings.}
+Computer Vision has seen incredible progress in the past decades. Starting from early Neural Networks learning how to recognise digits~\cite{mnist}, through AlexNet being the first Neural Network to win the ImageNet challenge~\cite{alexnet}, and now foundation models such as SAM 3 which can detect, segment and track any example object~\cite{sam3}. Such progress was enabled by architectural breakthroughs, computing power improvements, and an abundance of data - but the data has to be labelled and labelling is expensive. Self-supervised learning removes that requirement by deriving supervisory signal straight from the data themselves. Even without a label, a photograph carries rich structure and one can design a \emph{pretext} task whose solution requires the model to represent that structure and that representation only needs a small labelled set to solve the task one actually cares about such as classification or segmentation.
+
+One powerful supervisory signal to design the pretext task around is geometry. Doersch et al.~\cite{context2015} pair a reference patch with one of its eight neighbours on a fixes grid and ask the network to classify which of the eight spots the neighbour occupies. The model must learn both what each part represents as well as what the overall structure is. Noroozi and Favaro~\cite{jigsaw} extend that idea from a pair to a full permutation. In their method, an image is sliced according to a fixed grid and the patches are shuffled. Then the model's task is to recover the original image from the jigsaw puzzle. Later, during the transformer era, similar fixed-grid approaches appeared. MAE~\cite{mae}  reconstructs masked patches, while MP3~\cite{mp3} and DropPos~\cite{droppos} predict absolute patch positions once the positional embeddings have been removed or partially withheld. So far, all of the described methods are confined to a fixed grid.
+
+That is until \textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations~\cite{part} method was proposed. PART samples $N$ pairs of patches continuously, not confined to a fixed grid. It then tasks the model with predicting the relative translatoin \dxy{} between the two patches of pairs - this is a continuous target rather than a discrete one. What is also important is what that method withholds: the encoder receives no positional embeddings - nothing in the input tells the model where the patch is located. Therefore, in order to place e.g. the left ear above and to the left of the nose the model has to build a rich internal representation leveraging only the geometry as the supervisory signal.
 
 \section{Problem statement: from translation to \texorpdfstring{\SEtwo}{SE(2)}}\label{sec:problem-statement}
-\stub{PART supervises relative translation \dxy{} between off-grid patch pairs.
-Relative orientation \dphi{} is the missing generator that takes the pretext task
-from the translation subgroup to planar rigid motion. States the research question:
-does supervising \dphi{} yield representations with better orientation-sensitive
-downstream performance, without degrading classification?}
+PART supervises relative translation out of the box and the authors show that this method is extendable to relative scale and aspect ratio $(\Delta w, \Delta h)$ at a cost of slower convergence of \dxy{}~\cite{part}. The authors leave modelling rotation as future work. By adding relative orientation as a generator the pretext task expands from a translation subgroup to a group of planar rigid motions, \SEtwo{}. Adding rotation requires to first modify the pipeline to rotate the patches before embedding them and second to deal with a blur signature that the model could exploit to learn the angles without actually learning proper representations. Importantly, rotating a patch and supervising such rotation are two separate decisions which have to be separated: a model given rotated patches only supervising \dxy{} may still be affected by them. This distinction is kept throughout the whole of this report.
 
-\section{Objectives and scope}\label{sec:objectives-and-scope}
-\stub{What this project set out to deliver, and what was deliberately excluded ---
-ImageNet-1K pretraining and architecturally equivariant heads. Notes that the
-rotation work is flag-gated so the translation-only baseline path is unchanged.}
+The research question is then: 
+\begin{quote}Does supervising \dphi{} yield representations with better orientation-sensitive downstream performance without degrading classification at the same time?
+\end{quote}
+
+The answer has two parts. First, rotating patch pixels without rotation supervision is a nuisance factor which costs downstream performance relative to a baseline on both classification and orientation-sensitive task. Second, supervising \dphi{} converts that nuisance back into a signal - recovering performance on both tasks.
+
+\section{Objectives}\label{sec:objectives}
+There are several objectives of this project:
+\begin{itemize}
+\item Develop an extension to PART pretext task that introduces rotation as one of the supervisory signals, implementing it behind a flag so that the translation-only baseline path is unchanged when the flag is off.
+\item Establish if \dphi{} is learnable at all and if yes, then under which conditions. Diagnostic work uses ViT-S on CIFAR-100 where the patch size is capped at $8\times 8$ as the images are themselves $32\times 32$.
+\item Control the interpolation confound as rotating a patch introduces a blur signature correlated with the angle. Not controlling for blur would not allow to distinguish between the model learning the actual orientation rather that the artefacts.
+\item Pretrain four arms of a transformer-based model using ImageNet-100 data, each differing  by a single factor: translation-only baseline, rotated pixels with no \dphi{} target, \dphi{} supervised and bounded over a small range, and \dphi{} supervised and bounded over a wider range. Each model is a ViT-B/32 as the patches at this size are large enough to carry recoverable orientation and ImageNet-100 images are $224\times 224$.
+\item Scrutinise the structural soundness of the learned orientation channel: negative symmetry ($\dphi(i\!\to\!j) = -\dphi(j\!\to\!i)$) and consistency under composition around triples of patches.
+\item Evaluate the resulting encoders against the baseline on two downstream tasks: one basic and one orientation-sensitive, finetuned end-to-end rather than linear-probed, following the source paper.
+\end{itemize}
+
+
+
 
 \tocsubsectionstar{Contributions}
-\stub{Numbered list of the contributions, each one sentence, each pointing at the
-chapter that substantiates it.}
+The project's contributions are:
+\begin{enumerate}
+\item RoPART, a pretext task which extends PART's pairwise relative translation to planar rigid motion by supervising relative orientation, with $(\cos,\sin)$ regression, centered patch convention, and interpolation controls (\cref{ch:ropart}).
+\item A demonstration that relative orientation is learnable only with larger patch sizes. The model fails to learn orientation at small patch sizes such as $P=4,P=8$ and starts working at $P=32$. Notably, removing blur caused the model to fail at learning again, but that turned out to be an optimisation problem, not a missing signal (\cref{sec:does-dphi-learn}).
+\item A budget-matched four-arm study, differing by one factor per step. This isolates the effect of rotating pixels from the effect of supervising rotation. In addition, structural characterisation (negative symmetry, compositional consistency) was performed (\cref{sec:matched-budget}). 
+\item Two downstream measurements against the translation-only baseline, on ImageNet-100 classification and on horizon line estimation, scored once on a held-out split under a protocol fixed before the runs. Rotated pixels significantly damage orientation accuracy; supervising \dphi{} recovers the deficit and returns classification to parity (\cref{ch:downstream}).
+\end{enumerate}
+
 
 \tocsubsectionstar{Outline}
-\stub{One sentence per chapter. Closes with a pointer to the Declarations for the
-ethical position.}
+
+\Cref{ch:background} reviews self-supervised representation learning, traces the
+position-prediction lineage up to PART, and positions RoPART against existing
+rotation-based pretext tasks. \Cref{ch:ropart} defines the \SEtwo{} target and
+sets out the design decisions behind it: the angle representation and loss, the
+patch position convention, how pixels are rotated, and the controls that keep the
+interpolation confound from manufacturing a positive result. \Cref{ch:pretraining}
+asks whether relative orientation learns at all, then reports the matched-budget
+study over the four arms and the intrinsic structural checks.
+\Cref{ch:downstream} finetunes those encoders end to end on ImageNet-100
+classification and on Horizon Lines in the Wild, and reports the paired held-out
+comparison against the translation-only baseline. \Cref{ch:conclusion} draws the
+findings together and states the limitations.
 
 \ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
 \end{document}

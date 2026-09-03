@@ -52,8 +52,21 @@
 \usepackage{tikz}
 \usepackage{pgfplots}
 \usepackage[scaled=0.8, lining]{FiraMono}
-\usepackage{placeins}
+\usepackage[section]{placeins} % confine floats to the section they appear in
 \usepackage{flafter}
+
+% Float placement: let figures settle close to where they are declared.
+% `flafter` (above) forbids a float from floating *backwards* past its
+% definition point, `placeins[section]` stops it drifting into the next
+% section, and these relaxed fractions let a [htbp] float actually take the
+% `h' slot instead of being bumped to the top of the following page.
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.8}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
 \usepackage{fancyhdr}
 \usepackage{cleveref}
 \usepackage{url}
@@ -231,8 +244,7 @@
 \subfile{Introduction}%
 \subfile{Background}%
 \subfile{RoPART}%
-\subfile{Learning}%
-\subfile{MatchedBudget}%
+\subfile{Pretraining}%
 \subfile{Downstream}%
 \subfile{Conclusion}%
 
