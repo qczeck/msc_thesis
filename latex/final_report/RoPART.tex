@@ -5,132 +5,31 @@
 \begin{document}
 \ourchapter{RoPART: design and implementation}\label{ch:ropart}
 
-\section{The \texorpdfstring{\SEtwo}{SE(2)} target}\label{sec:se2-target}
-\stub{Extending the per-pair target from \dxy{} to \dxy{} plus \dphi{}, and the
-structural invariants it must satisfy: identity on the diagonal, symmetry in
-\(\cos\dphi\), antisymmetry in \(\sin\dphi\). Explains the build order --- one
-channel group at a time, simplest first --- so any downstream effect is attributable.}
-
-\section{Angle representation and loss}\label{sec:angle-representation}
-\stub{Why \((\cos\dphi, \sin\dphi)\) regression rather than a raw angle (the
-\(\pm\pi\) wrap) or discrete bins. The loss, and the \(w_\varphi\) group weighting
-that later turns out to matter more than expected.}
-To represent rotation, a simple direct angle regression may be used. This is a poor neural target: an angle is a point on the unit circle, so any scalar parametrisation is discontinuous at the $\pm\pi$ wrap-around, where two near-identical orientations sit at opposite ends of the range. The network must then approximate a discontinuous function, which yields large gradients at the seam and penalises errors that reflect no real geometric difference; Zhou et al.~\cite{rotcont} show such discontinuous representations are harder to learn. Encoding the angle on the unit circle as $(\cos\Delta\varphi,\sin\Delta\varphi)$ removes the seam and is therefore a better target, supervised either by an MSE on the two components or by a cosine loss $1-\cos(\Delta\hat\varphi-\Delta\varphi)$. This representation also fixes how the intrinsic metrics are computed: the predicted angle is recovered from the network's $(\cos,\sin)$ outputs, the angular error is measured as the difference from the true angle wrapped around the circle into $(-\pi,\pi]$, and the negative-symmetry and compositional-consistency checks are likewise evaluated on the circle rather than on raw scalar differences.
-
-Predicting several relative quantities from a shared backbone is a multi-task regression. This means that channels with different units and convergence rate may interfere and a single fixed loss weighting may prove hard to tune and may not be optimal throughout training. Indeed, in PART~\cite{part} itself adding the relative scale and aspect ratio terms delayed the convergence of translation terms relative to the baseline. One established solution is to make the weighting adaptive. Kendall et al.~\cite{kendall} propose weighting each task by a learned homoscedastic uncertainty which automatically downweights noisier tasks.
-
-
-\section{Patch position convention}\label{sec:position-convention}
-\stub{Centred versus corner anchors, and why the centre is the rotation-invariant
-choice that keeps translation decoupled from \dphi{}. Notes the reference-local
-frame as the deferred alternative.}
-
-\section{Rotating pixels}\label{sec:rotating-pixels}
-\stub{The crop--rotate--centre-crop--resize pipeline, which avoids empty corners.
-The two rotation sets: continuous bounded rotation, and the discrete quad set of
-exact \texttt{rot90} turns.}
-
-\section{Interpolation controls by construction}\label{sec:interpolation-controls}
-\stub{The resampling-blur signature correlated with \(\varphi\), and the control
-arms built to break it: raw, supersampled, and matched or randomised blur. Framed
-as a false-positive generator that any positive result must be tested against.}
-
-\section{The relative head}\label{sec:relative-head}
-\stub{The cross-attention relative encoder, the two query types, and the baseline
-that would not learn under the upstream default --- diagnosed with the single-batch
-overfit harness.}
-
-\section{Implementation}\label{sec:implementation}
-\stub{The \texttt{ropart} package: flag-gated diffs against the upstream path, the
-test suite, and device-agnostic execution across MPS and CUDA.}
-
-\section{Experimental infrastructure}\label{sec:infrastructure}
-\stub{Cluster execution, atomic checkpointing and supervised restart, experiment
-tracking, and what it takes to make a multi-day run survive a dead GPU box.}
-
-\section{Protocol and metrics}\label{sec:protocol-and-metrics}
-\stub{Datasets and model configurations. The mean-predictor floor and its
-derivation, the four intrinsic gates --- identity, negative symmetry, compositional
-consistency, translation --- and angular MAE. Every later result is quoted against
-these, so they are defined once, here.}
-\paragraph{Intrinsic metrics.} These characterise the orientation channel directly,
-computed on the unit circle to respect the $\pm\pi$ wrap-around:
-\begin{itemize}
-  \item \emph{Angular error} on $\Delta\varphi$, recovered from the predicted
-  $(\cos,\sin)$ outputs and wrapped into $(-\pi,\pi]$. The reference null is the
-  mean-predictor floor: for approximately uniform $\Delta\varphi$, predicting
-  $(0,0)$ gives a $(\cos,\sin)$ MSE of exactly $1.0$, so beating this floor by a
-  clear margin is the minimal evidence that anything is being learned.
-  \item \emph{Rotational negative symmetry}: predictions should satisfy
-  $\Delta\varphi(i\!\to\!j) = -\Delta\varphi(j\!\to\!i)$, the rotational analogue of
-  the translational symmetry already confirmed in Phase~0.
-  \item \emph{Compositional consistency}: relative orientations should compose
-  consistently around triples of patches.
-\end{itemize}
-A positive intrinsic result is angular error well below the mean-predictor floor with
-the symmetry and consistency invariants holding --- \emph{and}, critically, surviving
-a matched-interpolation control (the same resampling applied to $\varphi = 0$
-patches) rather than reflecting a resampling artefact.
-
-% =====================================================================
-%  WORKING SECTION --- delete before submission.
-%  Equation bank for Chapter 3. Every equation below is tagged with the
-%  section it is intended for; move it into that section's prose and
-%  delete it from here. Each block states what the equation asserts and,
-%  where it matters, which line of the implementation it was read off.
-% =====================================================================
-\section{Working notes: equation bank}\label{sec:eqbank}
-
-\stub{Scaffolding, not prose. Notation follows the source paper as summarised in
-\cref{sec:part}: $N$ patches of side $P$ from an $S\times S$ image, token width $d$,
-patch embeddings $X'$, per-pair target $\theta$ and prediction $\hat\theta$. Ordered
-pairs are written $(i,j)$ with $i$ the \emph{reference} and $j$ the \emph{target},
-matching PART's $(\mathrm{ref},\mathrm{tgt})$. Every equation here was read off the
-code that produced the results, and departures from the paper's presentation are
-flagged as such. A few blocks are marked \textbf{NOT IMPLEMENTED}: they describe an
-alternative discussed in the text but never run, and must not be written as though
-they were.}
-
-Two operators are used throughout. The planar rotation matrix
+Two operators will be used throughout this chapter and are worth defining here. The planar rotation matrix
 \begin{equation}\label{eq:rotmat}
   R(\varphi) \;=\;
   \begin{bmatrix} \cos\varphi & -\sin\varphi \\ \sin\varphi & \phantom{-}\cos\varphi \end{bmatrix},
 \end{equation}
-and the wrap-to-$(-\pi,\pi]$ operator, which is what makes every angular quantity in
-this report well defined,
+
+and the wrap-to$(-\pi,\pi]$ operator, which makes any angular quantity well defined
 \begin{equation}\label{eq:wrap}
   \operatorname{wrap}(\alpha) \;=\; \bigl((\alpha + \pi) \bmod 2\pi\bigr) - \pi
   \;\in\; (-\pi, \pi].
 \end{equation}
-In code \cref{eq:wrap} is the line \py{(pred - true + math.pi) \% (2*math.pi) - math.pi},
-which appears identically in \py{engine.\_pretrain\_metrics} and
-\py{eval.\_accumulate}.
 
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:se2-target}}{Section 3.1} --- the \texorpdfstring{\SEtwo}{SE(2)} target}
-% ---------------------------------------------------------------------
-
-\paragraph{Patch state as a group element.} Sampling gives patch $i$ a centre
-$c_i \in \mathbb{R}^2$ and an orientation $\varphi_i$, i.e. an element of \SEtwo{}:
+\section{The \texorpdfstring{\SEtwo}{SE(2)} target}\label{sec:se2-target}
+The per-pair target in PART was defined as \dxy{} and the per-pair target of RoPART can be thought of as \dxy{} plus \dphi{}. In other words, PART supervises the translation subgroup and RoPART closes the group by adding rotation as the missing generator.
+We can think of the patch state as a group element - sampling gives patch $i$ a centre $c_i \in \mathbb{R}^2$ and an orientation $\varphi_i$, i.e. an element of \SEtwo{}:
 \begin{equation}\label{eq:se2-element}
   g_i \;=\; (c_i, \varphi_i) \;\cong\;
   \begin{bmatrix} R(\varphi_i) & c_i \\ 0^{\!\top} & 1 \end{bmatrix} \in \SEtwo .
 \end{equation}
-PART's patches are axis-aligned, so $\varphi_i \equiv 0$ and $g_i$ lives in the
-translation subgroup $\mathbb{R}^2 \triangleleft \SEtwo$. This is the one-line
-statement of what the project extends.
-
-\paragraph{The relative transform.} The group-theoretically correct relative
-transform between the ordered pair is
+Going back to PART, the patches there were axis aligned ($\varphi \equiv 0$) and $g_i$ lives in the translation subgroup $\mathbb{R}^2 \triangleleft \SEtwo$.
+While group-theoretically relative transform between the ordered pair is defined as:
 \begin{equation}\label{eq:se2-relative}
   g_i^{-1} g_j \;=\; \bigl(\, R(-\varphi_i)(c_j - c_i),\; \varphi_j - \varphi_i \,\bigr).
 \end{equation}
-
-\paragraph{What is actually supervised.} \textbf{RoPART does not regress
-\cref{eq:se2-relative}.} The translation channels are differenced in the
-\emph{global} image frame, not rotated into the reference patch's frame
-(\py{build\_targets}); only the orientation channel is genuinely relative.
-The implemented target for the ordered pair $(i,j)$ is
+it is not what RoPART regresses. The actual implemented target for the ordered pair $(i,j)$ is
 \begin{equation}\label{eq:target-ropart}
   \theta_{ij}
   \;=\;
@@ -147,38 +46,9 @@ The implemented target for the ordered pair $(i,j)$ is
   \qquad
   \Delta\varphi \;\triangleq\; \varphi_j - \varphi_i .
 \end{equation}
-The two frames coincide up to the $R(-\varphi_i)$ factor; the reference-local variant
-of \cref{eq:se2-relative} is the deferred ablation recorded in
-\cref{sec:position-convention}. \emph{Write this honestly: the target is
-``\SEtwo{} with the translation read in a global frame'', not $g_i^{-1}g_j$.}
+Note that this target is not exactly \SEtwo, but rather \SEtwo with the translation read in a global frame, not $g_i^{-1}g_j$ exactly, as the translation channels are differenced in the global image frame. In other words, the two frames coincide up to the $R(-\varphi_i)$ factor. This decision was made for better compatibility and comparison with the PART method. This enabled adding rotation on top of translation similarly to how $\Delta w$ and $\Delta h$ were added. Note that $\dx$ and $\dy$ contain $P$ in the denominator as every patch is of the same size. Another point worth mentioning is that global rotation ($\varphi_i$) is never supervised, only the differences are. 
 
-Note also that $P$ in \cref{eq:target-ropart} is a constant, whereas PART divides by
-the reference patch's own $w_{\mathrm{ref}}, h_{\mathrm{ref}}$
-(\cref{sec:part}). RoPART fixes every patch to $P \times P$, so the two normalisations
-are identical here --- but say so, because it is also what removes the
-$(\Delta w, \Delta h)$ signal.
-
-\paragraph{The dense table.} For a batch of $b$ images the builder emits every ordered
-pair at once,
-\begin{equation}\label{eq:target-table}
-  T \in \mathbb{R}^{b \times C \times N \times N},
-  \qquad T[\,\cdot\,, :, i, j] = \theta_{ij},
-\end{equation}
-with the build order fixing $C$:
-\begin{equation}\label{eq:num-channels}
-  C \;=\;
-  \begin{cases}
-    2, & (\Delta x, \Delta y) \quad \text{--- translation-only baseline},\\
-    4, & +\,(\cos\Delta\varphi, \sin\Delta\varphi) \quad \text{--- RoPART},\\
-    6, & +\,(\Delta w, \Delta h) \quad \text{--- deferred, \textbf{never run}}.
-  \end{cases}
-\end{equation}
-$C$ is also the output width of the relative head (\cref{eq:head-out}), which is
-what makes the build order a one-line change.
-
-\paragraph{Structural invariants.} These are asserted on the \emph{targets} at
-construction (\py{check\_*\_invariants}) and \emph{measured} on the
-predictions in \cref{sec:protocol-and-metrics}:
+When the targets are constructed, they must first pass the structural invariants checks to confirm that they have been generated correctly. These are:
 \begin{align}
   \theta^{xy}_{ii} &= 0, &
   (\cos\Delta\varphi_{ii}, \sin\Delta\varphi_{ii}) &= (1, 0),
@@ -192,63 +62,68 @@ predictions in \cref{sec:protocol-and-metrics}:
   \Delta\varphi_{ik} &= \operatorname{wrap}(\Delta\varphi_{ij} + \Delta\varphi_{jk}).
   \label{eq:inv-composition}
 \end{align}
-\Cref{eq:inv-negsym} is the rotational analogue of PART's Figure~6; the asymmetry of
-the two rotation columns (cosine even, sine odd) is the sharper statement, since a
-head that merely predicted a constant would satisfy the cosine half.
+In words, rotation relative to self should be zero (identity), rotation from i to j should be equal to rotation from j to i (negative symmetry), and rotation from i to k should be equal to the sum of rotations from i to j and from j to k (composition). Note that these equations play double role - once when targets are constructed and once when predictions are evaluated. The second role ensures that the model took no shortcuts, e.g. by reading a blur signature. Out of all the checks, composition is the strongest and symmetry may hold when it does not. 
 
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:angle-representation}}{Section 3.2} --- angle representation and loss}
-% ---------------------------------------------------------------------
+For a batch of $b$ images, then, the builder emits every ordered pair at once,
+\begin{equation}\label{eq:target-table}
+  T \in \mathbb{R}^{b \times C \times N \times N},
+  \qquad T[\,\cdot\,, :, i, j] = \theta_{ij},
+\end{equation}
+with the build order fixing $C$:
+\begin{equation}\label{eq:num-channels}
+  C \;=\;
+  \begin{cases}
+    2, & (\Delta x, \Delta y) \quad \text{- translation-only baseline},\\
+    4, & +\,(\cos\Delta\varphi, \sin\Delta\varphi) \quad \text{- RoPART}
+  \end{cases}
+\end{equation}
+Note that $C$ is also the output width of the relative head which makes the build order a one-line change. This allows proper attribution of the supervision effect separate from the effect of rotation working as data augmentation.
 
-\paragraph{Why not a raw angle.} A scalar parametrisation $\varphi \in (-\pi,\pi]$ makes
-the squared error discontinuous across the seam: for $\varepsilon \to 0^{+}$,
+\section{Angle representation and loss}\label{sec:angle-representation}
+To represent rotation, a simple direct angle regression may be used. This is a poor neural target: an angle is a point on the unit circle, so any scalar parametrisation is discontinuous at the $\pm\pi$ wrap-around, where two near-identical orientations sit at opposite ends of the range. See this example:
 \begin{equation}\label{eq:wrap-discontinuity}
   \bigl(\,(\pi - \varepsilon) - (-\pi + \varepsilon)\,\bigr)^2 \;\longrightarrow\; 4\pi^2,
   \qquad\text{while the true angular separation is } 2\varepsilon \to 0 .
 \end{equation}
-This is the concrete form of the objection in \cite{rotcont}, and it is also
-\textbf{Hard-won fact \#3}: \py{WeightedMSELoss} has an all-weights-one fast path that
-would apply exactly \cref{eq:wrap-discontinuity} to a raw angle channel.
+The network must approximate a discontinuous function, which in the case of two orientations separated by $2\varepsilon$ either side of the seam incur a squared error of $\approx 4\pi^2$. Zhou et al.~\cite{rotcont} show such discontinuous representations are harder to learn and they prescribe a continuous embedding of the form $(\cos\Delta\theta, \sin\Delta\theta)$. Encoding the angle on the unit circle as $(\cos\Delta\varphi,\sin\Delta\varphi)$ removes the seam and is therefore a better target as it is a function that is continuous in $\varphi$. 
 
-\paragraph{The circle encoding.} Regress the point on $S^1$ instead,
+Formally, the target angle is mapped to a point on the unit circle, $S^1$:
 \begin{equation}\label{eq:circle-encoding}
   \Delta\varphi \;\longmapsto\; (\cos\Delta\varphi,\, \sin\Delta\varphi) \in S^1,
 \end{equation}
-and recover the predicted angle from the (unconstrained) head outputs
-$(\hat c, \hat s)$ by
+and the head regresses that point as two \emph{unconstrained} scalars $(\hat c, \hat s)$ and recovers the angle via
 \begin{equation}\label{eq:atan2}
   \widehat{\Delta\varphi} \;=\; \operatorname{atan2}(\hat s, \hat c).
 \end{equation}
 
-\paragraph{MSE on the circle \emph{is} a cosine loss.} If the prediction happened to lie
-on the unit circle, the two candidate losses named in the text coincide up to a factor
-of two:
+Note that MSE on the circle is a cosine loss and if the prediction lies on the unit circle, the two losses coincide up to a factor of two:
 \begin{equation}\label{eq:mse-equals-cosine}
   (\hat c - \cos\Delta\varphi)^2 + (\hat s - \sin\Delta\varphi)^2
   \;=\; \lVert \hat u \rVert^2 + 1 - 2\,\hat u^{\!\top} u
   \;\overset{\lVert\hat u\rVert = 1}{=}\; 2\bigl(1 - \cos(\widehat{\Delta\varphi} - \Delta\varphi)\bigr),
 \end{equation}
-with $\hat u = (\hat c, \hat s)$ and $u = (\cos\Delta\varphi, \sin\Delta\varphi)$.
-\emph{Caveat to state:} the head output is \emph{not} norm-constrained, so
-\cref{eq:mse-equals-cosine} holds only up to the $\lVert\hat u\rVert^2$ term ---
-plain MSE additionally penalises radial deviation, which acts as a free confidence
-channel. The runs used MSE, not the cosine form.
+with $\hat u = (\hat c, \hat s)$ and $u = (\cos\Delta\varphi, \sin\Delta\varphi)$. Note the caveat: the head output is not norm constrained, so \cref{eq:mse-equals-cosine} only holds up to the $\lVert\hat u\rVert^2$ term (this is because plain MSE additionally penalises radial deviation - a free confidence channel). The runs used MSE, not the cosine form.
 
-\paragraph{The loss as run.} Grouped MSE over $M$ sampled pairs, with the two channel
-groups $\mathcal{G}_{xy} = \{0,1\}$ and $\mathcal{G}_{\varphi} = \{2,3\}$
-(\py{losses.RelativeMSE}). The unbalanced form --- upstream's, and the default that
-keeps the baseline path unchanged --- is
+Predicting several relative quantities from a shared backbone is a multi-task regression. This means that channels with different units and convergence rate may interfere and a single fixed loss weighting may prove hard to tune and may not be optimal throughout training. Indeed, in PART~\cite{part} itself adding the relative scale and aspect ratio terms delayed the convergence of translation terms relative to the baseline. Furthermore, PART ~\cite{part} used a loss function that applied plain squared error to every channel through equal weights - while this could work with just translation, it greatly complicates learning rotation and the loss was designed with this issue in mind. One established solution is to make the weighting adaptive. Kendall et al.~\cite{kendall} propose weighting each task by a learned homoscedastic uncertainty which automatically downweights noisier tasks. RoPART does not learn the weighting; it uses fixed, data-driven analogue that divides by an observed target variance. 
+
+To introduce the loss, first define the four channels of $\theta_{ij}$ (\cref{eq:target-ropart}) split into two groups by what they measure - the translation rows and the rotation rows:
+  \begin{equation}\label{eq:channel-groups}
+    \mathcal{G}_{xy} = \{\Delta x,\, \Delta y\},
+    \qquad
+    \mathcal{G}_{\varphi} = \{\cos\Delta\varphi,\, \sin\Delta\varphi\},
+  \end{equation}
+  i.e.\ rows $1$-$2$ and rows $3$-$4$ of \cref{eq:target-ropart}
+  (\py{[:, 0:2]} and \py{[:, 2:4]} in \py{losses.RelativeMSE}, which is $0$-indexed). The loss is grouped MSE over $M$ sampled pairs, with the two channel groups:
 \begin{equation}\label{eq:loss-none}
   \mathcal{L}
   \;=\; w_{xy}\,\frac{1}{2 b M}\!\!\sum_{k \in \mathcal{G}_{xy}}\sum_{n,m}\!\bigl(\hat\theta_{knm} - \theta_{knm}\bigr)^2
   \;+\; w_{\varphi}\,\frac{1}{2 b M}\!\!\sum_{k \in \mathcal{G}_{\varphi}}\sum_{n,m}\!\bigl(\hat\theta_{knm} - \theta_{knm}\bigr)^2 .
 \end{equation}
-Setting $w_\varphi = 0$ and dropping $\mathcal{G}_\varphi$ recovers PART's
-$\mathcal{L}_{\mathrm{MSE}}$ of \cref{sec:part} exactly.
+where $k$ indexes channels within a group, $n=1,\dots,b$ indexes images in the batch, and $m=1\dots,M$ indexes the sampled ordered pairs of \cref{eq:pair-sampling}. Note that the loss is taken over the $M$ sampled pairs, not the full $N\times N$ table. Note that if we set $w_\varphi=0$ and drop $\mathcal{G}\varphi$ we recover PART's loss.
 
-\paragraph{Variance balancing --- the form every reported run actually used.} Each
-channel's squared error is divided by that channel's own detached batch target
-variance, i.e.\ by its own mean-predictor floor:
+There is an issue with the form above when $w_{xy}=w_\varphi=1$ the translation term is $\mathrm{Var}(\Delta x)\approx 6$ whereas the rotation group is bounded by $1-(\sin a/a)^4$ \cref {eq:rot-floor-bounded}, which at $a=30^\circ$ is $0.169$ - a $\sim$30$\times$ imbalance. In this case, $\Delta\varphi$ collapses to a mean-predictor. 
+
+To solve this issue we use variance balancing, where each channel's squared error is divided by that channel's own detached batch target variance, i.e. its own mean-prediction floor:
 \begin{equation}\label{eq:loss-variance}
   \mathcal{L}
   \;=\;
@@ -259,113 +134,51 @@ variance, i.e.\ by its own mean-predictor floor:
 \end{equation}
 where $\operatorname{sg}[\cdot]$ is the stop-gradient and both $\operatorname{MSE}_k$ and
 $\operatorname{Var}(\theta_k)$ are taken over the pooled $(b \times M)$ batch sample
-(biased variance). Every term is then a \emph{fraction of its own floor}, so both
+(biased variance). Every term is then a fraction of its own floor, so both
 groups are $O(1)$ irrespective of units or rotation range, and $w_{xy}, w_\varphi$
-become genuine relative-importance knobs.
+become actual relative-importance knobs. This is the form used in every reported run. Note the $\epsilon$ term as an argument in the $\max$ function - this is to prevent amplification which created NaNs during training when small range of rotations was tested. The clamp did not 'activate' when the rotation bounds were greater than $30^\circ$. The actual weights used were $w_{xy}=1$, $w_\varphi=0.1$.
 
-\emph{Two points the prose must make, because both are load-bearing:}
-\begin{enumerate}
-  \item \textbf{The need for \cref{eq:loss-variance} is quantitative, not aesthetic.}
-  With \cref{eq:loss-none} and $w_{xy}=w_\varphi=1$ the translation term is
-  $\operatorname{Var}(\Delta x) \approx 6$ against a rotation group bounded by
-  $1 - (\sin a / a)^4$ (\cref{eq:rot-floor-bounded}), which at $a = 30^\circ$ is
-  $0.169$ --- a $\sim$\,$30\times$ imbalance, and $\Delta\varphi$ collapses to the mean
-  predictor.
-  \item \textbf{$\epsilon$ is not a formality.} As $a \to 0$,
-  $\operatorname{Var}(\cos\Delta\varphi) = O(a^4)$, so an unclamped divisor amplifies
-  that channel by $\sim 10^{5}$--$10^{6}$ and NaNs training; $\epsilon = 10^{-3}$ caps
-  the amplification at $\sim 10^{3}$ and is inert for the $\pm 30^\circ$, $\pm 90^\circ$
-  and quad runs, whose variances are $\gg \epsilon$.
-\end{enumerate}
-The reported arms use $w_{xy} = 1$, $w_\varphi = 0.1$, and the translation-only baseline
-is run under \cref{eq:loss-variance} too --- otherwise its effective gradient scale
-differs from RoPART's translation group by $\sim$\,$20\times$ and it is not a control.
 
-\paragraph{\textbf{NOT IMPLEMENTED} --- Kendall homoscedastic weighting.} Cited in the
-prose as the established adaptive alternative \cite{kendall}; write it only as
-related work, never as something run:
-\begin{equation}\label{eq:kendall}
-  \mathcal{L} \;=\; \sum_{G} \frac{1}{2\sigma_G^{2}} \mathcal{L}_G \;+\; \log \sigma_G ,
-  \qquad \sigma_G \text{ learned}.
-\end{equation}
-\Cref{eq:loss-variance} is the fixed, data-driven analogue: it divides by an
-\emph{observed} target variance rather than a learned uncertainty.
-
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:position-convention}}{Section 3.3} --- patch position convention}
-% ---------------------------------------------------------------------
-
-\paragraph{The two anchors.} For the axis-aligned box $[x_s, y_s, x_e, y_e]$ with
-$x_e = x_s + P$, $y_e = y_s + P$:
+\section{Patch position convention}\label{sec:position-convention}
+For an axis-aligned patch (box) $[x_s,y_s,x_e,y_e]$ with $x_e=x_s+P,y_e=y_s+P$ there are two choices of an anchor:
 \begin{equation}\label{eq:anchors}
   c_i^{\text{centre}} = \Bigl(\tfrac{x_s + x_e}{2},\, \tfrac{y_s + y_e}{2}\Bigr)
   \qquad\text{vs.}\qquad
   c_i^{\text{corner}} = (x_s, y_s).
 \end{equation}
-
-\paragraph{Why the choice is free at $\varphi = 0$ but not after.} With constant patch
-size the two anchors differ by the same fixed offset for every patch, so the offset
-cancels in the difference:
+With no rotation, i.e. $\varphi=0$ there is no cost associated with choosing one option over the other. This can be seen in the equation below:
 \begin{equation}\label{eq:anchor-equivalence}
   c^{\text{centre}}_j - c^{\text{centre}}_i
   \;=\; \bigl(c^{\text{corner}}_j + \tfrac{P}{2}\mathbf{1}\bigr) - \bigl(c^{\text{corner}}_i + \tfrac{P}{2}\mathbf{1}\bigr)
   \;=\; c^{\text{corner}}_j - c^{\text{corner}}_i .
 \end{equation}
-Hence \emph{no baseline number changes} under the convention switch. Once patches carry
-$\varphi_i$, the corner is no longer a fixed offset from the centre --- it moves with
-the patch:
+So the two anchors differ by the same fixed offset for every patch. However, once patches carry $\varphi$ the corner is no longer a fixed offset from the centre - it moves with the patch:
 \begin{equation}\label{eq:corner-entangles}
   c^{\text{corner}}_i(\varphi_i) \;=\; c^{\text{centre}}_i - R(\varphi_i)\,\tfrac{P}{2}\mathbf{1},
 \end{equation}
-so a corner-anchored $\Delta x, \Delta y$ would carry a $\varphi$-dependent term and the
-translation channel would no longer be a clean control for the rotation channel. The
-centre is the unique fixed point of $R(\varphi_i)$ about the patch, which is the whole
-argument.
+So by choosing to anchor at the corners, \dxy would carry a $\varphi$-dependent term - the translation channel would lose its control properties for the rotation channel. The centre is the unique fixed point of $R(\varphi_i)$.%
+\footnote{A half-pixel detail that does not affect the targets: the target builder uses the
+geometric centre $(x_s + x_e)/2$, while the rotated pixel read uses the pixel-index centre
+$(x_s + x_e - 1)/2$, so that an integer coordinate lands on a pixel centre. The two differ by
+the same half pixel for every patch, so they cancel in the difference exactly as in
+\cref{eq:anchor-equivalence}.}
 
-\paragraph{The half-pixel subtlety --- worth a footnote, not a paragraph.} The target
-builder uses the geometric centre $(x_s + x_e)/2$, while the rotated pixel read uses the
-\emph{pixel-index} centre $(x_s + x_e - 1)/2$ so that an integer coordinate lands exactly
-on a pixel centre under \py{align\_corners=True} (which is what keeps
-$\varphi \in \{0, 90^\circ, \dots\}$ interpolation-free). The two differ by a constant
-$\tfrac{1}{2}\mathbf{1}$ for every patch, so by the same cancellation as
-\cref{eq:anchor-equivalence} the targets are unaffected.
-
-\paragraph{\textbf{NOT IMPLEMENTED} --- the reference-local frame.} The deferred
-alternative, and the translation half of \cref{eq:se2-relative}:
-\begin{equation}\label{eq:local-frame}
-  \Delta p^{\,\text{local}}_{ij} \;=\; \tfrac{1}{P}\, R(-\varphi_i)\,(c_j - c_i).
-\end{equation}
-
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:rotating-pixels}}{Section 3.4} --- rotating pixels}
-% ---------------------------------------------------------------------
-
-\paragraph{The empty-corner problem, and the window that solves it.} A $P \times P$
-square rotated by an arbitrary angle is not contained in its own axis-aligned footprint;
-it is contained in its diagonal. So read from
+\section{Rotating pixels}\label{sec:rotating-pixels}
+To create the rotated patches fed into the model, they have to be constructed via a pipeline. First of all, a $P\times P$ square rotated by an arbitrary angle is not contained in its own axis-aligned footprint - it is contained in the diagonal. We need to sample with a margin to avoid empty corners. Read from
 \begin{equation}\label{eq:rot-window}
   W \;=\; \bigl\lceil P\sqrt{2} \,\bigr\rceil,
   \qquad
   m \;=\; \Bigl\lfloor \tfrac{W - P + 1}{2} \Bigr\rfloor ,
 \end{equation}
-where $m$ is the edge margin a patch centre needs for the diagonal window to stay
-in-image. At $P = 32$: $W = 46$, $m = 7$. \emph{This margin is not cosmetic --- it
-narrows the sampling range and therefore changes the translation floor
-(\cref{eq:trans-floor}), which is why the baseline and rotation arms are not scored
-against an identical target distribution.}
-
-\paragraph{Box sampling.} Top-left corners are drawn independently and uniformly over
-the valid integer offsets,
+where $m$ is the edge margin. At $P=32$: $W=46,m=7$. Note that this narrows the range and changes the translation floor - note that this introduces changes in the target distribution between baseline and rotation arms. With the margin set, we independently and uniformly sample top-left corners over the valid integer offsets:
 \begin{equation}\label{eq:box-sampling}
   x_s, y_s \;\sim\; \mathcal{U}\{\,m,\, m+1,\, \dots,\, S - P - m\,\},
   \qquad
   M_{\text{pos}} \;=\; S - P - 2m + 1 ,
 \end{equation}
-with $m = 0$ for the translation baseline and for the quad control (exact
-\py{rot90} needs no diagonal window). Positions are continuous in the off-grid sense
---- any pixel offset, not a multiple of $P$ --- and patches may overlap.
+Positions are continuous in the off-grid sense and patches may overlap.
 
-\paragraph{Angle sampling.} One orientation per patch, i.i.d.:
+With the box sampled, we can now sample one orientation per patch, i.i.d:
 \begin{equation}\label{eq:angle-sampling}
   \varphi_i \;\sim\;
   \begin{cases}
@@ -374,10 +187,9 @@ with $m = 0$ for the translation baseline and for the quad control (exact
     \mathcal{U}\{0, \tfrac{\pi}{2}, \pi, \tfrac{3\pi}{2}\} & \text{quad}.
   \end{cases}
 \end{equation}
+Note that $a$ defines rotation bounds and quad is a special rotation model where only multiples of $90^\circ$ are selected (similar to RotNet~\cite{rotnet}).
 
-\paragraph{The read itself.} Extraction is a single inverse warp: for output pixel at
-patch-local, centred coordinates $(l_x, l_y)$ with
-$l \in \{-\tfrac{P-1}{2}, \dots, \tfrac{P-1}{2}\}$, the source coordinate is
+To actually extract the pixels, we could naively grab the diagonal window, rotate, centre-crop and resize. Instead, perform a single inverse warp: for output pixel at patch-local, centred coordinates $(l_x,l_y)$ with $l \in \{-\tfrac{P-1}{2}, \dots, \tfrac{P-1}{2}\}$, the source coordinate is:
 \begin{equation}\label{eq:inverse-warp}
   \begin{bmatrix} s_x \\ s_y \end{bmatrix}
   \;=\;
@@ -385,148 +197,127 @@ $l \in \{-\tfrac{P-1}{2}, \dots, \tfrac{P-1}{2}\}$, the source coordinate is
   + R(\varphi_i)
   \begin{bmatrix} l_x \\ l_y \end{bmatrix},
 \end{equation}
-and the patch value is the bilinear sample $p(l_x, l_y) = I(s_x, s_y)$. \emph{Exactly one
-interpolation} --- crop--rotate--centre-crop--resize is collapsed into one
-\py{grid\_sample}, which matters because each additional resampling would compound the
-blur of \cref{sec:interpolation-controls}. The normalisation into
-\py{grid\_sample} coordinates is against the \emph{original} extent, with
-\py{align\_corners=True}:
-\begin{equation}\label{eq:grid-normalise}
-  g_x \;=\; \frac{s_x}{(S-1)/2} - 1, \qquad g_y \;=\; \frac{s_y}{(S-1)/2} - 1 ,
-\end{equation}
-so that a supersampled source (\cref{eq:supersample}) maps to the same physical
-coordinates without rescaling the grid.
-
-\paragraph{Bilinear interpolation, written out.} Needed only if
-\cref{sec:interpolation-controls} argues about the point-spread function; with
-$\delta = s - \lfloor s \rfloor$ the fractional part,
+and the patch value is the bilinear sample $p(l_x, l_y) = I(s_x, s_y)$. Note that the naive approach contains two interpolating steps (rotate and resize) which would result in a compounded blur. Additionally, the blur is as small as it can be and is exactly bilinear - this will allow us to reason about it. Bilinear interpolation is defined as:
 \begin{equation}\label{eq:bilinear}
   I(s_x, s_y) \;=\; \sum_{u,v \in \{0,1\}}
     \bigl(1 - |u - \delta_x|\bigr)\bigl(1 - |v - \delta_y|\bigr)\;
     I\bigl[\lfloor s_x \rfloor + u,\; \lfloor s_y \rfloor + v\bigr].
 \end{equation}
-The kernel is separable with support that depends on $(\delta_x, \delta_y)$, and
-$(\delta_x, \delta_y)$ is a function of $\varphi_i$ --- that dependence \emph{is} the
-confound.
+Where $\delta = s - \lfloor s \rfloor$ as the fractional part. Note that the kernel is separable and its support depends on $(\delta_x,\delta_y)$ and $(\delta_x,\delta_y)$ is a function of $\varphi_i$ - this is exactly the confound.
 
-\paragraph{The quad path is a permutation, not a resampling.} With
+Side note for the quad path: it is a permutation, not a resampling.
 \begin{equation}\label{eq:quad-k}
   k \;=\; \Bigl(\operatorname{round}\!\bigl(\varphi_i \big/ \tfrac{\pi}{2}\bigr)\Bigr) \bmod 4,
   \qquad
   p \;=\; \operatorname{rot90}^{k}\bigl(\text{crop}_{P\times P}\bigr),
 \end{equation}
-$\delta_x = \delta_y = 0$ identically, \cref{eq:bilinear} degenerates to a copy, and no
-angle-correlated blur exists. This is the sense in which quad is confound-free
-\emph{by construction} rather than by control.
+In this case $\delta_x=\delta_y=0$ and \cref{eq:bilinear} generates a copy - no angle-correlated blur exists. Thus quad arm is confound-free by construction.
 
-\paragraph{Packing into the pseudo-image.} Patch $k$ is placed row-major in a
-$\sqrt{N} \times \sqrt{N}$ tiling, so the ViT's stride-$P$ convolution recovers the
-tokens one-to-one:
+With patches available, now the next step is to pack them into a pseudo-image. Patch $k$ is placed row-major in a $\sqrt{N}\times\sqrt{N}$ tiling, so the ViT's stride-$P$ convolution recovers the tokens one-to-one:
 \begin{equation}\label{eq:retile}
   \hat I\bigl[\,\cdot\,,\; r P + u,\; c P + v\,\bigr] \;=\; p_k[\,\cdot\,, u, v],
   \qquad r = \bigl\lfloor k / \sqrt{N} \bigr\rfloor,\; c = k \bmod \sqrt{N}.
 \end{equation}
-\emph{Say plainly that the tiling order carries no geometric information} --- $k$ is
-the sampling index, unrelated to where the patch came from. That is what makes the
-pseudo-image an unordered set to a position-embedding-free encoder.
+It is extremely important to emphasise that $k$ is merely the sampling index, completely unrelated to where the patch came from. It is in no way a position embedding. To the encoder, the pseudo-image is an unordered set.
 
-Finally the standard channel normalisation, applied after packing:
+Finally, the standard channel normalisation is applied after packing:
 \begin{equation}\label{eq:normalise}
   \tilde I \;=\; (\hat I - \mu)/\sigma,
   \quad \mu = (0.485, 0.456, 0.406),
   \quad \sigma = (0.229, 0.224, 0.225).
 \end{equation}
-Worth one sentence: pretraining applies \emph{no other} augmentation, deliberately, so
-that the baseline-vs-rotation contrast is not confounded by the augmentation pipeline
-(upstream applies full DeiT augmentation).
+This is the only augmentation used in the pretraining. Upstream work applied full DeiT augmentation. In order to reduce the number of possible confounds, we opted not to follow suit.
 
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:interpolation-controls}}{Section 3.5} --- interpolation controls}
-% ---------------------------------------------------------------------
-
-\paragraph{The signature, made measurable.} The confound needs a scalar before it can be
-controlled. Use mean absolute pixel gradient --- a high-frequency-energy proxy --- of a
-patch rotated by $\varphi$:
+\section{Interpolation controls by construction}\label{sec:interpolation-controls}
+With rotation, resampling is unavoidable and loses detail as a function of $\varphi$. It is also possible that a model can obtain a high score on the pretext task by simply reading the blur. Therefore we need to measure the blur to decide how to mitigate the issue. One measurement for magnitude we can use is mean absolute pixel gradient - a high-frequency-energy proxy:
 \begin{equation}\label{eq:sharpness}
   E(\varphi) \;=\; \bigl\langle\, |\partial_x p_\varphi| + |\partial_y p_\varphi| \,\bigr\rangle .
 \end{equation}
-Sweeping $\varphi$ gives a curve that peaks at $0^\circ, 90^\circ, 180^\circ$ and dips at
-$45^\circ, 135^\circ$ --- so $E$ is a deterministic, angle-correlated leak. This is the
-sentence that turns ``interpolation noise'' into ``a false-positive generator''.
+By sweeping $\varphi$ we obtain the curve in \cref{fig:interp-confound}. It is lossless at multiples of $90^\circ$ and features ~21\% loss at every other angle. 
 
-\paragraph{The trap: the blur is oriented.} Bilinear resampling is convolution with the
-separable kernel of \cref{eq:bilinear}, whose effective point-spread function
-$\mathrm{PSF}_{\text{interp}}(\varphi)$ is anisotropic with an orientation that tracks
-$\varphi$. Therefore
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\textwidth]{interpolation_confound.pdf}
+  \caption[The interpolation confound and its controls]{%
+    \textbf{The interpolation confound, and what each control does to it.}
+    High-frequency energy (mean absolute pixel gradient) against patch orientation,
+    for 16 fixed patches ($P = 64$) from one image, normalised by the raw path at
+    $\varphi = 0$.
+    \textbf{(a)} The cue. Bilinear resampling is lossless only at exact multiples of
+    $90^\circ$, where the sample points land on pixel centres, and gives up
+    ${\approx}21\%$ of the energy at every other angle; the inset magnifies the
+    ${\approx}3\%$ off-axis ripple, whose maxima - not minima - fall at $45^\circ$
+    and $135^\circ$. \py{nearest} confirms the mechanism: no interpolation, no loss.
+    \textbf{(b)} The four controls. Flatness is only half of what a control needs:
+    (c)~supersampling flattens while staying \emph{high}, preserving real detail;
+    (a)~matched blur flattens by discarding it; (d)~dominant low-pass flattens lowest
+    of all; and (b)~randomised blur does not flatten the conditional mean at all.
+  }%
+  \label{fig:interp-confound}
+\end{figure}
+
+There is one more trap: the blur is oriented. Bilinear resampling is convolution with the separable kernel of \cref{eq:bilinear}. It's effective point-spread function is anisotropic with an orientation that tracks $\varphi$. Therefore:
 \begin{equation}\label{eq:magnitude-not-sufficient}
   E_{\text{ctrl}}(\varphi) = \text{const}
   \;\;\not\Longrightarrow\;\;
   \mathrm{PSF}_{\text{ctrl}}(\varphi) = \text{const} .
 \end{equation}
-\emph{This is the key inequality of the section:} flattening the magnitude cue is
-necessary but not sufficient, and it is what ranks the four controls below.
-
-\paragraph{(a) Matched blur --- \textbf{NOT IMPLEMENTED}.} Solve for a per-angle
-isotropic $\sigma(\varphi)$ that flattens \cref{eq:sharpness} to its worst case:
+In words: flattening the magnitude cue is necessary but not sufficient. This is what will rank the four controls below. The controls are:
+\begin{enumerate}
+\item Matched blur: solve for a per-angle isotropic $\sigma(\varphi)$ that flattens \cref{eq:sharpness} to its worst case:
 \begin{equation}\label{eq:matched-blur}
   \sigma(\varphi) \;:\; E\bigl(G_{\sigma(\varphi)} * p_\varphi\bigr) \;=\; \min_{\varphi'} E(\varphi')
   \quad \forall \varphi .
 \end{equation}
-Prototyped by bisection ($E$ is monotone decreasing in $\sigma$) but never wired into a
-run --- \py{\_extract\_matched} raises \py{NotImplementedError}. By
-\cref{eq:magnitude-not-sufficient} it addresses only the magnitude cue anyway.
-
-\paragraph{(b) Randomised blur.} Draw the blur independently of the angle,
+It only addresses the magnitude cue.
+\item Randomised blur: Draw the blur independently of the angle
 \begin{equation}\label{eq:randomised-blur}
   \sigma \sim \mathcal{U}(0, \sigma_{\max}), \quad \sigma_{\max} = 0.8,
   \qquad p \;\leftarrow\; G_\sigma * p_\varphi .
 \end{equation}
-State its limitation as an equation, because it is counter-intuitive: randomisation adds
-angle-independent \emph{variance} but leaves the systematic term intact,
+It has one limitation: randomisation adds angle-independent variance but leaves the systematic term intact:
 \begin{equation}\label{eq:randomised-limit}
   \mathbb{E}\bigl[E \mid \varphi\bigr] \;\text{still dips at } 45^\circ .
 \end{equation}
-So (b) is the \emph{weakest} control, not the cheap win it appears to be.
-
-\paragraph{(c) Supersampling --- the control the results rest on.} Bicubically upsample
-the source by $k$ before the read of \cref{eq:inverse-warp}, so the fractional offsets
-of \cref{eq:bilinear} shrink:
-\begin{equation}\label{eq:supersample}
+\item Supersampling: bicubically upsample the source by $k$ before reading \cref{eq:inverse-warp}. This way the fractional offsets of \cref{eq:bilinear} shrink
+ \begin{equation}\label{eq:supersample}
   \delta^{(k)} \;=\; O(1/k), \qquad k = 4 ,
 \end{equation}
-making the resampling near-lossless and its PSF near angle-independent --- it removes
-both the magnitude \emph{and} the direction cue. Empirically $k = 4$ leaves a residual
-sharpness ratio of $0.96$ against $0.81$ for the raw path, i.e.\ $\approx 96\%$ of the
-signature removed, not $100\%$. \emph{Quote that residual; it is the honest loose end of
-the whole positive result.}
-
-\paragraph{(d) Dominant isotropic low-pass.} Swamp the anisotropy with one heavy
-isotropic blur on every patch:
+This makes resampling near-lossles and its PSF near angle-independent. Both cues are removed - \emph{this is the control that was selected and all the results rest on}. Note that for $k=4$ the residual sharpness ratio is 0.96 versus 0.81 for the raw path - we removed $\approx96\%$ of the signature, not $100\%$.
+\item Dominant isotropic low-pass: swamp the anisotropy with one heavy isotropic blur for each path:
 \begin{equation}\label{eq:dominant-lp}
   \mathrm{PSF}_{\text{eff}}(\varphi) \;=\; \mathrm{PSF}_{\text{interp}}(\varphi) * G_{\sigma_{\mathrm{lp}}},
   \qquad \sigma_{\mathrm{lp}} = 1.0 ,
 \end{equation}
-chosen so the isotropic term dominates and the $\varphi$-dependence becomes a
-perturbation. Heaviest signal loss of the four.
+This will result in the heaviest signal loss of the four.
+\end{enumerate}
+Table \cref{tab:controls} summarises the controls.
+\begin{table}[htbp]
+  \centering
+    \caption[The four interpolation controls]{Which cue each control breaks. The
+    magnitude cue is the angle-dependent loss of high-frequency energy; the direction
+    cue is the orientation of the anisotropic resampling PSF, which
+    \cref{eq:magnitude-not-sufficient} shows a flat energy curve does not remove.
+    ``Retained'' is off-axis high-frequency energy as a fraction of the raw path at
+    $\varphi = 0$, read off \cref{fig:interp-confound}(b) - higher is better, and it
+    is the price each control charges in real signal.}
+    \label{tab:controls}
+    \begin{tabular}{llccr l}
+      \toprule
+      & Control & Magnitude & Direction & Retained & Role \\
+      \midrule
+      & raw                        & ---     & ---     & 0.79 & the confounded path \\
+      (a) & matched blur           & broken  & intact  & 0.78 & specified, not run \\
+      (b) & randomised blur        & intact  & intact  & 0.74 & weakest; adds variance only \\
+      (c) & supersample $\times 4$ & broken  & broken  & 0.94 & the reported arms \\
+      (d) & dominant low-pass      & broken  & broken  & 0.38 & worst-case stress test \\
+      \bottomrule
+    \end{tabular}
+\end{table}
 
-\paragraph{Discretised Gaussian.} If the implementation detail is wanted: the kernel side
-is $\max\bigl(2\operatorname{round}(3\sigma) + 1,\, 3\bigr)$, i.e.\ $\pm 3\sigma$
-support forced odd.
-
-\paragraph{The control matrix.} The point of the section in one line --- the controls
-differ in \emph{which} cue they break:
-\begin{equation}\label{eq:control-summary}
-  \text{(a) magnitude only},\quad
-  \text{(b) neither, adds variance},\quad
-  \text{(c) both},\quad
-  \text{(d) both, at heavy cost}.
-\end{equation}
-
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:relative-head}}{Section 3.6} --- the relative head}
-% ---------------------------------------------------------------------
-
-\paragraph{Encoder.} A plain pre-norm ViT, with the one departure that matters:
+\section{The relative head}\label{sec:relative-head}
+The encoder takes the input pseudo-image and turns it into $N$ patch tokens $X'$. The relative head maps and ordered pair $9i,j)$ to $\hat\theta{ij}$ - it is the prediction against the target \cref{eq:target-ropart}. A standard Vision Transformer encoder is used, with one exception:
 \begin{align}
   X &= \mathrm{PatchEmbed}(\tilde I) \in \mathbb{R}^{N \times d},
   &
@@ -540,16 +331,9 @@ differ in \emph{which} cue they break:
   &&
   \label{eq:vit-out}
 \end{align}
-\textbf{No position embeddings are added during pretraining} --- $E_{\mathrm{pos}}$ is
-present as a parameter but is applied only on the classification forward. This is
-PART's premise and RoPART inherits it: with attention permutation-equivariant and
-\cref{eq:retile} carrying no geometry, the encoder sees an unordered set, so the
-geometry \emph{is} the supervision. Note the \py{[CLS]} token is appended \emph{last},
-not prepended, and is dropped before the relative head --- worth a footnote because
-it is the reason a frozen linear probe on this checkpoint is ill-posed.
+That exception is that no position embeddings are passed. $E_{\mathrm{pos}}$ does exist as a parameter but is not passed until the classification finetuning. This is the same premise as in PART ~\cite{part}. Because attention is permutation invariant and \cref{eq:retile} contains no geometry, the encoder sees an unordered set - geometry is the supervision.
 
-\paragraph{Pair sampling.} $M$ ordered pairs are drawn without replacement from the
-$N^2$ cells of the table, once per forward and \emph{shared across the batch}:
+Pair sampling is a crucial step in the process. $M$ ordered pairs are drawn (without replacement) from the $N^2$ possibilities. This step happens once per forward pass and is shared across the batch:
 \begin{equation}\label{eq:pair-sampling}
   \mathrm{idx} \subset \{0, \dots, N^2 - 1\},\; |\mathrm{idx}| = M,
   \qquad
@@ -557,13 +341,14 @@ $N^2$ cells of the table, once per forward and \emph{shared across the batch}:
   \quad
   j = \mathrm{idx} \bmod N .
 \end{equation}
-Give the numbers: at $P = 32$, $N = 49$ and $M = 2048$ of $N^2 = 2401$ --- $85\%$ of all
-ordered pairs, including the $N$ diagonal cells, so the identity constraint
-\cref{eq:inv-identity} is in-distribution rather than an extrapolation. Contrast with
-the $M = 64$ default we inherited; upstream's own sweep uses $512$--$4096$.
+At $P=32,N=49$ and $M=2048$, $M/N^2\approx85\%$ of all ordered pairs (including $N$ diagonal cells) are sampled. $2048$ was chosen as upstream swept $512-4096$.
 
-\paragraph{The query --- the decision of \cref{sec:relative-head}.} For pair
-$m = (i, j)$, the two variants are
+The next step is to construct the query. There are two options
+\begin{itemize}
+\item $\texttt{patch\_cat}$: builds the query from the two patch features, no positional code enters the head at any point
+\item $\texttt{positional}$: injects a fixed sinusoidal code for the pair index into query and keys
+\end{itemize}
+So for pair $m=(i,j)$ the options are
 \begin{align}
   q_m^{\texttt{patch\_cat}} &= W_{\mathrm{in}}\bigl[\,x'_i \,;\, x'_j\,\bigr] + b_{\mathrm{in}},
   \qquad W_{\mathrm{in}} \in \mathbb{R}^{d \times 2d},
@@ -572,51 +357,232 @@ $m = (i, j)$, the two variants are
   \qquad\text{with keys } x'_n \leftarrow x'_n + \mathrm{PE}_{1\mathrm{d}}[n].
   \label{eq:query-positional}
 \end{align}
-\emph{The contrast is the point.} \Cref{eq:query-patchcat} builds the query from
-content alone, so no positional code enters the head at any point and the ``no position
-embeddings'' premise survives end to end; \cref{eq:query-positional} injects a fixed
-sinusoidal code for the pair index into both query and keys, and on this configuration
-the baseline then collapses to the mean-predictor floor and cannot overfit a single
-batch. \Cref{eq:query-patchcat} is the default for baseline and RoPART alike.
+During experiments on a single batch, \texttt{patch\_cat} was able to overfit and learn normally whereas \texttt{positional} collapsed to the mean-prediction floor. Those experiments were ran on the baseline model and resulted in the decision to opt to \texttt{patch\_cat}. Note that this is limited to this configuration and by no mean states a general rule.
 
-\paragraph{Cross-attention.} One \py{nn.MultiheadAttention} layer with a single head,
-queries $Q = [q_1; \dots; q_M]$ and keys/values the patch tokens $X'$:
+Following the query, we construct a single cross-attention layer with a single head. The queries are $Q = [q_1; \dots; q_M]$ and keys/values the patch tokens are $X'$:
 \begin{equation}\label{eq:cross-attention}
   Z \;=\; \operatorname{softmax}\!\left(\frac{(Q W_Q)(X' W_K)^{\!\top}}{\sqrt{d}}\right)(X' W_V)\, W_O .
 \end{equation}
-\emph{Note the divergence from \cref{sec:part}:} the paper writes the head as
-$\operatorname{softmax}(\hat X X'^{\!\top}/\sqrt{d})\,X'$, omitting the four internal
-projections $W_Q, W_K, W_V, W_O$ that \py{nn.MultiheadAttention} in fact applies. Either
-present \cref{eq:cross-attention} and say the paper's form is the schematic, or present
-the schematic and footnote the projections --- but do not silently mix them.
+Note that PART~\cite{part} writes $\operatorname{softmax}(\hat X X'^{\!\top}/\sqrt{d})\,X'$, omitting the four internal
+projections $W_Q, W_K, W_V, W_O$ that \py{nn.MultiheadAttention} applies. The form above in \cref{eq:cross-attention} is more accurate than the schematic in the paper.
 
-\paragraph{Output.} A final linear map to the channel width of
-\cref{eq:num-channels}:
+Finally, we construct a final linear map to the channel width of \cref{eq:num-channels}:
 \begin{equation}\label{eq:head-out}
   \hat\theta \;=\; Z\,W_{\mathrm{out}} + b_{\mathrm{out}} \in \mathbb{R}^{M \times C},
   \qquad W_{\mathrm{out}} \in \mathbb{R}^{d \times C}.
 \end{equation}
-$W_{\mathrm{out}}$ is the \emph{only} tensor whose shape depends on the build order ---
-which is the concrete content of ``the head is fully parametrised by
-\py{num\_channels}''.
+Note that $W_{\mathrm{out}}$ is the only tensor whose shape depends on the build order.
 
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:implementation}}{Section 3.7} and \texorpdfstring{\cref{sec:infrastructure}}{Section 3.8}}
-% ---------------------------------------------------------------------
 
-\stub{No equations needed. The one formal statement worth making in
-\cref{sec:implementation} is the flag-gating invariant --- that with rotation off the
-computation is identical to the baseline path, i.e.\
-$\text{RoPART}\big|_{C=2} \equiv \text{baseline}$ --- and that is better made as a
-sentence plus the test name than as display maths.}
+\section{Implementation}\label{sec:implementation}
+This section describes the more technical details of the implementation. The model is available as a Python package \py{ropart}. While not directly forked, it bases part of the codebase directly on PART. Additional modules were added on top of the scope of the original repository and many parts of the upstream code were modified as well. For easy comparison to baseline, setting the rotation flag off RoPART$|_{C=2}$ is the baseline computation. A suite of tests was introduced to ensure that the generated patches and targets associated with them were correct. See below for a list in \cref{tab:tests}:
 
-% ---------------------------------------------------------------------
-\subsection{For \texorpdfstring{\cref{sec:protocol-and-metrics}}{Section 3.9} --- protocol and metrics}
-% ---------------------------------------------------------------------
 
-\paragraph{Optimisation.} AdamW, $\beta = (0.9, 0.999)$, weight decay $0.05$ applied to
-matrices only (biases, norms, \py{cls\_token} and \py{pos\_embed} excluded). The
-schedule is per-\emph{epoch}, linear warmup into cosine decay:
+\begin{table}[htbp]
+  \centering
+  \caption[What the test suite guarantees]{What the test suite guarantees. Each row pairs a claim
+  made in this chapter with the test that holds it; these ten are the
+  chapter-relevant subset of a 37-test suite, the remainder covering shapes,
+  registries and the evaluation utilities. Note that they are property and oracle checks, rather than
+  unit tests. The suite is run locally under MPS, it has not been run under CUDA.}
+  \label{tab:tests}
+  \footnotesize
+  \begin{tabular}{p{0.42\textwidth} l}
+    \toprule
+    Claim & Test \\
+    \midrule
+    Targets equal an independent oracle (\cref{eq:target-ropart})
+      & \py{targets\_match\_helpers\_oracle} \\
+    Identity, negative symmetry and composition hold on real batches
+    (\cref{eq:inv-identity}-\cref{eq:inv-composition})
+      & \py{invariants\_on\_batch} \\
+    \addlinespace
+    Quad rotation is an exact pixel permutation (\cref{eq:quad-k})
+      & \py{crop\_patches\_quad\_is\_exact\_rot90} \\
+    Batched extraction equals the per-patch loop (\cref{eq:inverse-warp})
+      & \py{crop\_patches\_rotated\_} \\
+      & \quad\py{batched\_equals\_loop} \\
+    Angles are drawn from the stated sets (\cref{eq:angle-sampling})
+      & \py{bounded\_rotation\_sampling} \\
+    \addlinespace
+    With rotation off the loss is unchanged (\cref{eq:loss-none})
+      & \py{loss\_balance\_default\_unchanged} \\
+    Variance balancing rescales both groups (\cref{eq:loss-variance})
+      & \py{loss\_balance\_variance\_} \\
+      & \quad\py{rescales\_groups} \\
+    $\epsilon$ prevents the small-range blow-up (\cref{eq:loss-variance})
+      & \py{loss\_eps\_guards\_small\_} \\
+      & \quad\py{variance\_blowup} \\
+    \addlinespace
+    \py{ch2} controls rotate pixels but do not supervise them
+    (\cref{sec:interpolation-controls})
+      & \py{ss\_ch2\_control\_rotates\_} \\
+      & \quad\py{but\_unsupervised} \\
+    Metrics agree with a hand-computed oracle
+    (\cref{sec:protocol-and-metrics})
+      & \py{eval\_metrics\_oracle} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Most differences with the PART paper relate to modifying the underlying vision transformer to work with rotation and larger patch sizes. Among other settings, a different loss was used and learning rates were adjusted. See \cref{tab:upstream-divergences} for a comprehensive list.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Divergences from the upstream PART configuration]{Divergences from upstream
+  PART. The first two rows take a value from the authors' own sweep in place of an
+  entry-point default they never ran; the third is agreement with upstream, listed
+  because it is commonly assumed a divergence. Only the last four change the
+  computation.}
+  \label{tab:upstream-divergences}
+  \footnotesize
+  \begin{tabular}{@{}l p{0.20\textwidth} p{0.20\textwidth} p{0.30\textwidth}@{}}
+    \toprule
+    Setting & Upstream & RoPART & Why \\
+    \midrule
+    Query type      & \py{positional} (default); sweep runs both & \py{patch\_cat}
+      & the baseline does not learn under \py{positional} (\cref{sec:relative-head}) \\
+    \py{num\_pairs} & 64 (default); sweep $512$--$4096$          & 2048
+      & 256 pairs left the head without traction at $P = 16$ \\
+    Centred targets & 1 (default)                                & centred, always
+      & the rotation-invariant anchor (\cref{sec:position-convention}) \\
+    \addlinespace
+    \py{num\_channels} & 4: $(\Delta x, \Delta y, \Delta w, \Delta h)$
+                       & 2 or 4: $(\Delta x, \Delta y)$, then $(\cos\Delta\varphi, \sin\Delta\varphi)$
+      & scale deferred; rotation is the contribution \\
+    Loss            & \py{WeightedMSELoss}, equal weights        & \py{RelativeMSE}, variance-balanced
+      & plain squared error cannot balance the two groups (\cref{eq:loss-variance}) \\
+    Learning rate   & scaled by $\text{batch}/512$               & literal $\eta_{\max}$
+      & the scaling silently changes $\eta$ with batch size \\
+    Augmentation    & full DeiT pipeline                         & normalisation only
+      & keeps the baseline-vs-rotation contrast unconfounded \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Finally, adjustments were made to allow for running the code both in local development on an M1 Pro ARM-based SoC and on Department of Computing CUDA-enabled GPU boxes and GPU cluster. Most importantly, \texttt{float64} is unsupported on MPS and \texttt{randperm} with a fixed seed permutes differently per device. See \cref{tab:device-parity} below for a full overview of the differences between the two setups:
+
+\begin{table}[htbp]
+  \centering
+  \caption[Accelerator parity against CPU]{The same code on both accelerators, each
+  measured against its own machine's CPU reference: ViT-B/32, batch 2, $M = 2048$, with
+  the pair set held fixed so only arithmetic differs. Timing is one
+  forward--backward--step, mean of ten.}
+  \label{tab:device-parity}
+  \begin{tabular}{l l l}
+    \toprule
+                                   & MPS (Apple silicon)   & CUDA (RTX 2080 Ti, \py{gpu30}) \\
+    \midrule
+    \py{torch}                     & 2.12.1                & 2.12.1+cu130 \\
+    Max abs.\ deviation from CPU   & $6.4 \times 10^{-7}$  & $5.8 \times 10^{-7}$ \\
+    Relative deviation             & $2.9 \times 10^{-6}$  & $2.6 \times 10^{-6}$ \\
+    Loss vs CPU                    & identical (16 s.f.)   & rel.\ $1.1 \times 10^{-7}$ \\
+    \py{randperm} matches CPU      & no                    & no \\
+    \py{float64}                   & unsupported           & supported \\
+    Seconds per step               & $0.110$               & $0.038$ \\
+    \midrule
+    Role                           & development, testing   & all reported pretraining \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Experimental infrastructure}\label{sec:infrastructure}
+The scripts were carefully designed to avoid wasting GPU time on failed runs. To achieve this, auto-resume functionality was introduced. Training scripts automatically check for \py{\{OUT\}/checkpoint.pth} and on a hit, resume from that checkpoint. There is however, a worse issue than a missing checkpoint - a truncated checkpoint may not crash the script but will nevertheless corrupt the results. To avoid this issue, atomic checkpointing was introduced. While the checkpoint is overwritten every epoch, we added functionality to save snapshots of the model every $N$ epochs. The runs were tracked semi-online using Weights and Biases in offline mode and a custom script to sync periodically. 
+
+For pretraining, four large jobs were ran with a matched-budget of 250 epochs. A summary is provided in \cref{tab:run-inventory}.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Pretraining run inventory]{The four matched-budget pretraining runs.
+  All ViT-B/32 @ 224 on ImageNet-100, $P = 32$, batch 192, $M = 2048$, bf16, launched 2026-08-03. Wall-clock is end-to-end for a
+  single uninterrupted job; no arm died, resumed or was resubmitted.}
+  \label{tab:run-inventory}
+  \footnotesize
+  \begin{tabular}{@{}l l l r r r@{}}
+    \toprule
+    Job & Arm & Partition & Epochs & Wall & s/epoch \\
+    \midrule
+    269805 & translation-only baseline    & \py{a40}  & 250 & 12.9 h & 183 \\
+    269807 & \py{ch2}, rotated pixels, unsupervised & \py{a100} & 250 & 32.2 h & 455 \\
+    269806 & RoPART $\pm 30^\circ$        & \py{a100} & 250 & 28.6 h & 403 \\
+    269808 & RoPART $\pm 90^\circ$        & \py{a100} & 250 & 31.8 h & 453 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+While pretraining ran on the SLURM cluster, both finetunes ran on DoC GPU boxes as at the queue times (3.5 days) greatly exceeded the job length (4 hours). Below is a brief overview:
+
+\begin{table}[htbp]
+  \centering
+  \caption[Cost and scheduling by job class]{What each class of run costs, and where
+  it was scheduled.}
+  \label{tab:job-classes}
+  \footnotesize
+  \begin{tabular}{@{}l >{\raggedright\arraybackslash}p{0.22\textwidth} l r r@{}}
+    \toprule
+    Job class & Hardware and scheduling & Precision & Wall per arm & Total GPU \\
+    \midrule
+    Pretraining, 250 ep
+      & SLURM, 1 GPU, 16 CPU, 48\,GB, 3-day walltime request
+      & bf16 & 12.9--32.2 h & 105.5 h \\
+    \addlinespace
+    IN-100 finetune, 100 ep
+      & lab boxes \py{gpu22}, \py{gpu29} (RTX 2080 Ti), two arms at a time
+      & fp16 & 3.9--4.2 h & 16.2 h \\
+    \addlinespace
+    HLW v2 finetune, 100 ep
+      & lab box \py{gpu29} (RTX 2080 Ti), all four arms serial
+      & fp16 & 5.1 h & 20.2 h \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Protocol and metrics}\label{sec:protocol-and-metrics}
+In total, three different datasets were used over the course of this project. Similarly to PART~\cite{part}, CIFAR-100~\cite{cifar} was used for initial development and experimentation with rotation. ImageNet-100~\cite{imagenet}, a 100-class subset of ImageNet was used for all pretraining and the classification check. Horizon Lines in the Wild~\cite{hlw} (v2 to be exact) was used for the orientation-sensitive downstream task. ViT-S was used for CIFAR, ViT-B for ImageNet and HLW.
+\begin{table}[htbp]
+  \centering
+  \caption[The three datasets]{The three datasets. Examples are single images drawn from each set:
+  CIFAR-100 (class \emph{castle}), ImageNet-100
+  (\emph{Doberman pinscher}), and HLW (\py{Madrid\_Metropolis}, ground-truth
+  $\theta = -30.1^\circ$).}
+  \label{tab:datasets}
+  \footnotesize
+  \setlength{\tabcolsep}{4pt}
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.09\textwidth}
+                    >{\raggedright\arraybackslash}p{0.17\textwidth}
+                    >{\raggedright\arraybackslash}p{0.16\textwidth}
+                    >{\raggedright\arraybackslash}p{0.16\textwidth}
+                    >{\raggedright\arraybackslash}p{0.13\textwidth}
+                    c@{}}
+    \toprule
+    Dataset & Contents & Labels & Resolution & Splits & Example \\
+    \midrule
+    CIFAR-100
+      & Low-resolution natural images, one dominant object per image
+      & 100 fine classes, grouped into 20 coarse superclasses
+      & $32 \times 32$ RGB, fixed
+      & 50\,000 train, 10\,000 test; no official val
+      & \raisebox{-0.85\height}{\includegraphics[width=0.11\textwidth]{example_cifar100.png}} \\
+    \addlinespace
+    ImageNet-100
+      & Web photographs of objects, animals and scenes; 100 ImageNet synsets
+      & one class per image; discarded during pretraining, used for the finetune
+      & variable; distributed at 160\,px short side, resized to $224 \times 224$
+      & 126\,689 train, 5\,000 val (scored as test)
+      & \raisebox{-0.85\height}{\includegraphics[width=0.11\textwidth]{example_in100.jpg}} \\
+    \addlinespace
+    HLW (v2)
+      & Flickr photographs of outdoor scenes and landmarks, frequently tilted
+      & horizon-line endpoints $(x_1,y_1,x_2,y_2)$, converted to $(\theta, \rho)$
+      & variable full-resolution; pre-resized to 224\,px short side, centre-cropped
+      & 96\,617 train, 525 val, 2\,018 test (100\,553 total)
+      & \raisebox{-0.85\height}{\includegraphics[width=0.11\textwidth]{example_hlw.jpg}} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+In terms of optimisation, AdamW with $\beta = (0.9, 0.999)$ and weight decay $0.05$ applied to matrices only (excluding biases, norms, \py{cls\_token} and \py{pos\_embed}) was used. The following per-epoch schedule was used:
 \begin{equation}\label{eq:lr-schedule}
   \eta(e) \;=\;
   \begin{cases}
@@ -626,91 +592,69 @@ schedule is per-\emph{epoch}, linear warmup into cosine decay:
       & e \geq E_w,
   \end{cases}
 \end{equation}
-with $\eta_{\max} = 5\!\times\!10^{-4}$, $\eta_{\mathrm{warm}} = 10^{-6}$,
-$\eta_{\min} = 10^{-5}$, $E_w = 5$, $E = 250$, batch size $192$.
-\emph{Two things to state:} (i) unlike upstream's \py{main.py}, no linear
-$\eta \times \text{batch}/512$ rescaling is applied --- $\eta_{\max}$ is the literal
-peak; (ii) $\eta$ is a pure function of $e$ and $E$, which is why a longer run had to be
-launched from scratch rather than resumed (resuming with a larger $E$ would warm-restart
-the cosine near its peak).
+It is a linear warmup into cosine decay. Parameter values: $\eta_{\max} = 5\!\times\!10^{-4}$, $\eta_{\mathrm{warm}} = 10^{-6}$,
+$\eta_{\min} = 10^{-5}$, $E_w = 5$, $E = 250$, batch size $192$. Note the difference mentioned in \cref{tab:upstream-divergences} - the scaling no longer silently changes $\eta$ with batch size.
 
-\paragraph{Mean-predictor floors --- derive these once, here.} Every result in
-\cref{ch:pretraining} is quoted as a fraction of a floor, so the floors must be
-exact rather than asserted.
+Before diving in any further, a clear distinction has to be made. Evaluation of the models is dense - all four gates are computed on the full $N\times N$ ordered-pair table. Training is sampled: $M=2048$ pairs are selected for training. As a consequence, the gates are not measured on the training subsample.
 
-\emph{Translation.} With corners i.i.d.\ uniform over $M_{\text{pos}}$ integer offsets
-(\cref{eq:box-sampling}) and $\Delta x = (x_{s,j} - x_{s,i})/P$,
+If we were to quote results in raw pixel RMSE we would have no scale and would not be able to spot a collapsed head. In this project, the evidence will be presented as distance from the mean-predictor null. The metric to reflect that will be translation/rotation floor. Every result will be quoted as a fraction of a floor. The translation floor is defined as:
 \begin{equation}\label{eq:trans-floor}
   \operatorname{Var}(\Delta x)
-  \;=\; \frac{2\operatorname{Var}(x_s)}{P^2}
+  \;=\; \frac{2\operatorname{Var}(c)}{P^2}
   \;=\; \frac{M_{\text{pos}}^{2} - 1}{6 P^{2}} .
 \end{equation}
-At $S = 224$, $P = 32$: the baseline ($m = 0$, $M_{\text{pos}} = 193$) gives $6.06$ and
-the rotation arms ($m = 7$, $M_{\text{pos}} = 179$) give $5.21$, both matching the
-measured \py{floor\_x} to $0.1\%$. \emph{This equation is what licenses the caveat that
-the arms are not measured against an identical target distribution}, and the
-rescaling factor $\sqrt{6.06/5.21} = 1.079$ used to check that the ordering does not
-depend on the choice.
+Where patch centres are $c=x_s+P/2$ with the corner $x_s$ i.i.d. uniform over $M_{\text{pos}}$ integer offsets (\cref{eq:box-sampling}), so with the centred convention of \cref{sec:position-convention}, $\Delta x = (c_j - c_i)/P$. Note that the floor is $6.06$ for the baseline ($m=0$) and $5.21$ for the $\pm30^\circ$ ($m=7$). Note that this shows that the margin reduced the target distribution. One could perform a common target spread normalisation to put both on one scale by multiplying the raw error by the ratio of target standard deviations. We accumulate \texttt{floor\_x} empirically and find that the floors calculated above match the empirical results to $0.1\%$. 
 
-\emph{Rotation, full circle.} Predicting $(\hat c, \hat s) = (0,0)$ gives
+Similarly, we report rotation floor. For a full circle, predicting $(\hat c, \hat s)=(0,0)$ gives:
 \begin{equation}\label{eq:rot-floor-uniform}
   \mathbb{E}\bigl[\cos^2\Delta\varphi + \sin^2\Delta\varphi\bigr] \;=\; 1 \quad\text{exactly},
 \end{equation}
-the origin of the ``$\text{rot\_mse}$ floor $= 1.0$'' quoted throughout.
-
-\emph{Rotation, bounded.} For $\varphi \sim \mathcal{U}[-a, a]$ i.i.d.,
-$\mathbb{E}[\cos\varphi] = \sin a / a$ and $\mathbb{E}[\sin\varphi] = 0$, so
-$\mathbb{E}[\cos\Delta\varphi] = (\sin a / a)^2$ and the floor is
+This was calculated in anticipation of models with full unrestricted rotation. For bounded rotation, $\varphi \sim \mathcal{U}[-a, a]$ i.i.d.,
+$\mathbb{E}[\cos\varphi] = \sin a / a$ and $\mathbb{E}[\sin\varphi] = 0$, so $\mathbb{E}[\cos\Delta\varphi] = (\sin a / a)^2$, and
 \begin{equation}\label{eq:rot-floor-bounded}
   \operatorname{Var}(\cos\Delta\varphi) + \operatorname{Var}(\sin\Delta\varphi)
   \;=\; 1 - \Bigl(\frac{\sin a}{a}\Bigr)^{\!4}
   \;=\;
   \begin{cases} 0.169, & a = 30^\circ,\\ 0.836, & a = 90^\circ.\end{cases}
 \end{equation}
-\textbf{Flag this in the text:} the training log hard-codes $\text{rot\_floor} = 1.0$,
-which is exact only for the full circle, so the logged bounded-run ratio is
-conservative. The reported bounded results are quoted against the \emph{angular} floor
-below, which is computed empirically and is correct.
-
-\emph{Angular floor.} $\Delta\varphi = \varphi_j - \varphi_i$ with $\varphi \sim
+During training, \texttt{rot\_floor=1.0} was mistakenly hard-coded for all training runs, resulting in overly conservative estimates. This had no impact on training and the correct numbers can be obtained via a simple calculation. For reporting, a different metric of the rotation channel was used - angular floor. $\Delta\varphi = \varphi_j - \varphi_i$ with $\varphi \sim
 \mathcal{U}[-a,a]$ is triangular on $[-2a, 2a]$ with density
-$f(t) = (2a - |t|)/(4a^2)$, so the constant predictor $\Delta\varphi = 0$ --- which is
-the circular median --- achieves
+$f(t) = (2a - |t|)/(4a^2)$, so the constant predictor $\Delta\varphi = 0$ - which is
+the circular median - achieves
 \begin{equation}\label{eq:ang-floor}
   \mathbb{E}\bigl|\Delta\varphi\bigr| \;=\; \tfrac{2}{3} a
   \;=\;
   \begin{cases} 20.0^\circ, & a = 30^\circ,\\ 60.0^\circ, & a = 90^\circ,\end{cases}
   \qquad\text{and } 90^\circ \text{ for the full circle.}
 \end{equation}
-Measured: $19.96^\circ$ and $59.89^\circ$. \emph{This is the most useful equation in the
-chapter} --- it is the number every rotation result is read against, and it explains why
-$\pm 90^\circ$ can have a worse absolute angular error and still be learning
-orientation \emph{better} once floor-normalised.
+Note that this definition permits $\pm90^\circ$ worse absolute angular error while learning orientation better once floor-normalised. The measured values were $19.96^\circ$ and $59.89^\circ$ - any rotation results will be read agains either of the two numbers.
 
-\paragraph{Intrinsic gates.} All four are computed on the \emph{dense} $N \times N$
-prediction table (every ordered pair, not the training subsample), off-diagonal except
-where stated. Write $\hat t_{ij} = (\hat\theta^x_{ij}, \hat\theta^y_{ij})$ and
+Angular error itself is defined as:
+\begin{equation}\label{eq:metric-ang-mae}
+  \mathrm{MAE}_\varphi
+  = \Bigl\langle\, \bigl|\operatorname{wrap}\bigl(\operatorname{atan2}(\hat s_{ij}, \hat c_{ij}) - \Delta\varphi_{ij}\bigr)\bigr| \,\Bigr\rangle_{i \neq j},
+\end{equation}
+and is the headline rotation metric.
+
+Finally, the models predictions must pass through four intrinsic gates. Denote $\hat t_{ij} = (\hat\theta^x_{ij}, \hat\theta^y_{ij})$ and
 $\hat u_{ij} = (\hat c_{ij}, \hat s_{ij})$.
 
-\emph{(1) Floor ratios and pixel error.}
+\begin{enumerate}
+\item Floor ratios and pixel error:
 \begin{equation}\label{eq:metric-floor-ratio}
   \frac{\operatorname{MSE}_x}{\operatorname{Var}(\Delta x)},
   \qquad
   \mathrm{RMSE}_{\mathrm{px}} \;=\; P\sqrt{\bigl\langle\, \lVert \hat t_{ij} - t_{ij} \rVert^2 \,\bigr\rangle_{i \neq j}} .
 \end{equation}
-
-\emph{(2) Identity.} Query the head on $(i,i)$, where the answer is known
-(\cref{eq:inv-identity}):
+This helps us figure out if anything is being learned at all - without the floor a collapsed mean-predictor could still post low loss. This is a necessary condition but not sufficient
+\item Identity, query the head on $(i,i)$ where the answer is known (\cref{inv-identity}):
 \begin{equation}\label{eq:metric-identity}
   \mathrm{Id}_{xy} = P\sqrt{\bigl\langle \lVert \hat t_{ii} \rVert^2 \bigr\rangle_i},
   \qquad
   \mathrm{Id}_{\mathrm{rot}} = \sqrt{\bigl\langle (\hat c_{ii} - 1)^2 + \hat s_{ii}^2 \bigr\rangle_i} .
 \end{equation}
-Its diagnostic value is worth a sentence: a head that ignored the queried slots and
-averaged over the image would fail \cref{eq:metric-identity} while still beating the
-floor.
-
-\emph{(3) Negative symmetry}, as a residual-to-signal RMS ratio so it is scale-free:
+This guards against the model producing an image-level average (which can beat the floor) rather than reading the two queried slots. 
+\item Negative symmetry
 \begin{align}
   \rho^{\mathrm{sym}}_{xy}
     &= \sqrt{\frac{\sum_{i \neq j} \lVert \hat t_{ij} + \hat t_{ji} \rVert^2}
@@ -721,16 +665,14 @@ floor.
                   {\sum_{i \neq j} \bigl[\hat c_{ij}^2 + \hat s_{ij}^2\bigr]}} .
   \label{eq:metric-negsym-rot}
 \end{align}
-Both $\to 0$ for a perfectly consistent head. \Cref{eq:metric-negsym-rot} tests the
-cosine-even/sine-odd pair of \cref{eq:inv-negsym} simultaneously.
-
-\emph{(4) Compositional consistency}, over random distinct triples $(i,j,k)$ --- the
-strongest gate, since pairwise symmetry can hold while composition fails:
+It is a ratio of the residual and the signal - that makes it scale-free. For a perfectly consistent head, both $\to 0$. \Cref{eq:metric-negsym-rot} tests the cosine-even/sine-odd pair of \cref{eq:inv-negsym} simultaneously.
+\item Compositional consistency, over random distinct triples $(i,j,k)$
 \begin{equation}\label{eq:metric-comp-xy}
   \rho^{\mathrm{comp}}_{xy}
   = \sqrt{\frac{\sum \lVert \hat t_{ik} - (\hat t_{ij} + \hat t_{jk}) \rVert^2}
                {\sum \lVert \hat t_{ik} \rVert^2}},
 \end{equation}
+
 \begin{equation}\label{eq:metric-comp-rot}
   \mathrm{MAE}^{\mathrm{comp}}_{\mathrm{rot}}
   = \Bigl\langle\; \bigl|\operatorname{wrap}\bigl(\widehat{\Delta\varphi}_{ik} - \widehat{\Delta\varphi}_{ij} - \widehat{\Delta\varphi}_{jk}\bigr)\bigr| \;\Bigr\rangle,
@@ -738,25 +680,9 @@ strongest gate, since pairwise symmetry can hold while composition fails:
 \end{equation}
 Note \cref{eq:metric-comp-rot} composes the \emph{decoded angles}, not the
 $(\cos,\sin)$ vectors, so it is insensitive to the head's output norm.
+\end{enumerate}
 
-\emph{Angular error} itself, the headline rotation metric:
-\begin{equation}\label{eq:metric-ang-mae}
-  \mathrm{MAE}_\varphi
-  = \Bigl\langle\, \bigl|\operatorname{wrap}\bigl(\operatorname{atan2}(\hat s_{ij}, \hat c_{ij}) - \Delta\varphi_{ij}\bigr)\bigr| \,\Bigr\rangle_{i \neq j},
-\end{equation}
-read against \cref{eq:ang-floor}.
-
-\emph{Quad accuracy}, for the discrete arms only --- the fraction of pairs whose decoded
-angle rounds to the correct quarter-turn:
-\begin{equation}\label{eq:metric-quad-acc}
-  \mathrm{Acc}_{\mathrm{quad}}
-  = \Bigl\langle\, \mathbb{1}\bigl[\, |\operatorname{wrap}(\widehat{\Delta\varphi} - \Delta\varphi)| < \tfrac{\pi}{4} \,\bigr] \Bigr\rangle,
-  \qquad \text{chance} = 25\% .
-\end{equation}
-
-\paragraph{The composite positive criterion.} Worth stating as a single displayed
-condition, because it is the standard the whole of \cref{ch:pretraining} is judged
-against:
+We can combine all the criteria into a single positive criterion. This is the standard by which the models will be judged in \cref{ch:pretraining}:
 \begin{equation}\label{eq:positive-criterion}
   \underbrace{\mathrm{MAE}_\varphi \ll \tfrac{2}{3}a}_{\text{beats the floor}}
   \;\;\wedge\;\;
