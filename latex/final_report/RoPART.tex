@@ -647,7 +647,7 @@ $\hat u_{ij} = (\hat c_{ij}, \hat s_{ij})$.
   \mathrm{RMSE}_{\mathrm{px}} \;=\; P\sqrt{\bigl\langle\, \lVert \hat t_{ij} - t_{ij} \rVert^2 \,\bigr\rangle_{i \neq j}} .
 \end{equation}
 This helps us figure out if anything is being learned at all - without the floor a collapsed mean-predictor could still post low loss. This is a necessary condition but not sufficient
-\item Identity, query the head on $(i,i)$ where the answer is known (\cref{inv-identity}):
+\item Identity, query the head on $(i,i)$ where the answer is known (\cref{eq:inv-identity}):
 \begin{equation}\label{eq:metric-identity}
   \mathrm{Id}_{xy} = P\sqrt{\bigl\langle \lVert \hat t_{ii} \rVert^2 \bigr\rangle_i},
   \qquad

@@ -5,16 +5,134 @@
 \begin{document}
 \ourchapter{Downstream evaluation}\label{ch:downstream}
 
+Everything in the previous chapter was measured on the pretext task the models were pretrained on. Everything here is measured on new, downstream tasks and the question becomes whether \dphi{} is worth learning (not if it is possible to learn). The models used for finetuning are the models featured in \cref{tab:matched-arms}. There are two tasks. The first is ImageNet-100 classification~\cite{imagenet} - we now add the labels back to the training set and will judge how the model classifies images into those labels. The second task is Horizon Lines in the Wild~\cite{hlw} horizon line estimation. The first task is there to measure the cost of modelling rotation and the second one is there a potential benefit of supervising rotation would appear. Furthermore, the HLW task has a build in specificity control - the task asks for two channels: $\theta$ and $\rho$. $\theta$  is the in-plane orientation whereas $\rho$ is translation-like. A welcome result would be improved performance on $\theta$ while not degrading performance on $\rho$.
+
+Note that finetuning will be performed by full finetune as opposed to a linear-probe as this was the decision made in the upstream~\cite{part}. All statistical protocols were decided upon before seeing any results to protect them from bias.
+
+Based on the held-out HLW split, three results were obtained:
+\begin{enumerate}
+\item Rotated pixels cost orientation (\texttt{ch2} vs baseline).
+\item RoPART$\pm90^\circ$ costs orientation (compared to baseline).
+\item RoPART$\pm30^\circ$ beats the baseline but the effect if very small and the confidence intervals graze zero.
+\end{enumerate}
+
+We also established in \ref{ch:pretraining} that wider rotation bound was worse than the narrower one on every structural gate. This could have suggested similar pattern to emerge downstream but it appears not to be the case - on classification, $\pm90^\circ$ scores $69.74$ against $\pm30^\circ$'s $70.00$ - there is virtually no difference. So the range cost is confined to the pretext task and is a poor predictor of transfer.
+
+
 \section{Protocol: end-to-end finetuning}\label{sec:finetune-protocol}
-\stub{The evaluation protocol and why it is a finetune rather than a linear probe:
-all four of the source paper's downstream results are finetunes, and a frozen probe
-would freeze exactly what the paper trains.}
+PART~\cite{part} made the choice to finetune the entire model rather than linearly probe. Its downstream results (COCO detection, CIFAR-100, PhysioNet sleep staging) are end-to-end finetunes. Quoting directly:
+\begin{quote}
+``Once the model is pretrained, we tune the network end-to-end using labeled data in a
+supervised setup. Following the standard ViT setup, we eliminate the relative encoder and
+substitute it with a linear classification or detection head after the \texttt{[CLS]}
+token, which aggregates global input information. Unlike pretraining, we incorporate
+randomly initialized learnable position embeddings\ldots{}''~\cite[\S4]{part}
+\end{quote}
+
+We followed suit. In our case, preparing the pretrained models involved dropping the \texttt{head} as the relative encoder no longer has a role to play, dropping \texttt{clf} and reinitialising it as the old and new shapes do not match, and re-initialising \texttt{pos\_embed}. Then we finetune according to the recipe in \cref{tab:finetune-recipe} which is identical for all arms and both downstream tasks. Note that nothing is frozen.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The finetune recipe]{The finetuning recipe}
+  \label{tab:finetune-recipe}
+  \footnotesize
+  \begin{tabular}{@{}l l@{}}
+    \toprule
+    Setting & Value \\
+    \midrule
+    backbone            & ViT-B/32 at $224$ px, $87{,}532{,}132$ trainable parameters, none frozen \\
+    initialisation      & \py{--init-from <pretrain checkpoint>}; \py{head.*} and \py{clf.*} dropped, \\
+                        & \py{pos\_embed} re-initialised (\py{trunc\_normal\_}, std $0.02$) \\
+    epochs              & 100, warm-up 5, \py{--eval-every 1} \\
+    optimiser           & AdamW, weight decay $0.05$, $\beta = (0.9,\, 0.999)$ \\
+    learning rate       & $1 \times 10^{-4}$, cosine to $1 \times 10^{-6}$ \\
+    batch size          & 192 \\
+    precision           & fp16 - the Turing lab boxes emulate bf16 rather than \\
+                        & implementing it, so fp16 is the faster of the two there \\
+    dataloader workers  & 6 (the boxes have 8 CPUs) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+One note on reporting: instead of reporting the best epoch (which is a metric biased upwards) we report the mean over the final ten epochs - this applies to both tasks.
 
 \section{Statistical protocol}\label{sec:statistical-protocol}
-\stub{Per-image pairing, bootstrap confidence intervals, Wilcoxon signed-rank tests,
-and the multiplicity correction. Why the analysis was pre-registered before the runs,
-and what pairing buys: an unpaired difference here is wider than every effect worth
-measuring.}
+The statistical protocol was fixed before any training runs finished. This is because the effects measured so far were small and by hand-picking the statistical tests based on whether they give preferred results, we could direct the conclusion in any way we wanted. As a consequence, the held-out test split is scored only once, at the end instead of every epoch. What follows is what was decided:
+
+Throughout the remainder of this section, $e^{(a)}_i$ is the error of arm $a$ on image $i$ of the held-out split, on a channel $e \in \{\theta, \rho, \texttt{horizon}\}$, and $n = 2018$ is the number of images. Each of the three rotation arms is compared to the baseline, never to each other. Note that the HLW held-out errors are from a single scoring run of the 99th epoch weights in contrast to \texttt{val} numbers which use a last-10-epoch mean as stated in \cref{sec:finetune-protocol}.
+
+\begin{description}\setlength{\itemsep}{0.6em}
+
+\item[The statistic: paired per-image difference.] Both arms are scored on the same
+images, so scene difficulty cancels instead of entering the noise. $d_i$ is one image's
+difference and $\bar d$ the mean; negative means the arm beats the baseline.
+\begin{equation}\label{eq:paired-diff}
+  d_i \;=\; e^{(a)}_i - e^{(\mathrm{base})}_i,
+  \qquad
+  \bar d \;=\; \frac{1}{n}\sum_{i=1}^{n} d_i .
+\end{equation}
+
+\item[Standard error] $s$ is the spread of the
+per-image errors and $s_d$ the spread of their \emph{differences}. The unpaired form carries
+the heavy tail of hard scenes ($s \approx 2.13^\circ$ against a mean of $0.97^\circ$) and
+gives $0.066^\circ$; the paired form cancels that component and gives $\approx 0.016^\circ$, roughly $4\times$ narrower.
+\begin{align}
+  \widehat{\mathrm{SE}}_{\text{unpaired}}
+    &= \sqrt{\frac{s_a^2 + s_{\mathrm{base}}^2}{n}} \;\approx\; \sqrt{2}\,\frac{s}{\sqrt{n}},
+  \label{eq:se-unpaired}\\[2pt]
+  \widehat{\mathrm{SE}}_{\text{paired}}
+    &= \frac{s_d}{\sqrt{n}},
+  \qquad
+  s_d^2 = \frac{1}{n-1}\sum_{i=1}^{n} \bigl(d_i - \bar d\bigr)^2 .
+  \label{eq:se-paired}
+\end{align}
+Note that the standard error presented here is only used to justify per-pair approach rather than contribute numerically to any tests.
+
+\item[Paired bootstrap - an interval on the mean difference.] Image indices are resampled
+with replacement $B$ times; $\bar d^{*(b)}$ is the mean difference on the $b$-th resample and
+$q_p$ its $p$-th percentile. No distributional assumption is made.
+\begin{equation}\label{eq:bootstrap-ci}
+  \mathrm{CI}_{95}
+  \;=\; \Bigl[\, q_{2.5}\bigl(\{\bar d^{*(b)}\}_{b=1}^{B}\bigr),\;\;
+                 q_{97.5}\bigl(\{\bar d^{*(b)}\}_{b=1}^{B}\bigr) \Bigr],
+  \qquad B = 20{,}000 .
+\end{equation}
+
+
+\item[Wilcoxon signed-rank] Two-sided, on the
+same $d_i$, so it is not dominated by the minority of hard scenes that drive $\bar d$. $R_i$
+is the rank of $|d_i|$ among the $m$ non-zero differences and $t$ runs over tie group sizes;
+$z$ is the tie-corrected normal approximation.
+\begin{equation}\label{eq:wilcoxon}
+  W^{+} = \!\!\sum_{i \,:\, d_i > 0}\!\! R_i ,
+  \qquad
+  z = \frac{W^{+} - \tfrac{1}{4}m(m+1)}
+           {\sqrt{\tfrac{1}{24}m(m+1)(2m+1) - \tfrac{1}{48}\sum_{t}\bigl(t^3 - t\bigr)}} .
+\end{equation}
+
+\item[The corrected threshold: Bonferroni.] Three arms are compared to the baseline on
+the primary channel, so $m_{\text{comp}} = 3$.
+\begin{equation}\label{eq:bonferroni}
+  \alpha' \;=\; \frac{\alpha}{m_{\text{comp}}} \;=\; \frac{0.05}{3} \;=\; 0.0167 .
+\end{equation}
+
+\item[Specificity criterion] An effect genuinely about
+in-plane orientation must move $\theta$ and leave the translation-like $\rho$ alone. An arm
+improving $\rho$ as much as $\theta$ has simply become a better model; one improving only
+$\rho$ is evidence \emph{against} the mechanism.
+\begin{equation}\label{eq:specificity}
+  p_\theta < \alpha
+  \quad\wedge\quad
+  p_\rho \geq \alpha .
+\end{equation}
+
+\end{description}
+
+The bootstrap and the signed-rank test can disagree, and on one comparison they do
+(\cref{sec:hlw-results}). Both are reported; neither is suppressed in favour of the
+friendlier one.
+
+Note that there are three sources of the noise. The first comes from image sampling as some examples are simply more difficult. To alleviate that, pairing was used as it was cost-free. The second comes from finetune stochasticity. Every arm reported in this chapter is a single finetune seed, so this source is not controlled in the results. A five-seed replication of \texttt{base}, \texttt{ch2} and \texttt{w30} was launched under the protocol above; it had not completed at the time of writing. The third source of noise is pretraining stochasticity. A multiple-seed replication would take 30 hours per arm and was deemed out of budget. The scoring pipeline was first tested on \texttt{val} to rule out wiring issues and to not use \texttt{test}.
 
 \section{Classification on ImageNet-100}\label{sec:in100}
 \stub{The no-degradation check on a basic task. Rotated pixels cost accuracy;

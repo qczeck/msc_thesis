@@ -4,6 +4,9 @@ build/
 # the pre-converted logo is a source asset, not a build artefact: without it a
 # fresh clone falls back to the .eps and needs an epstopdf shell-out to build.
 !images/imperial-logo.pdf
+# likewise the generated figures: their scripts live in RoPART/ropart/scripts/,
+# but the report must build from a clone without running them.
+!figures/*.pdf
 
 ## Core latex/pdflatex auxiliary files:
 *.aux

@@ -7,8 +7,9 @@ out/
 # wandb run logs (offline + online cache)
 wandb/
 
-# CIFAR-100 download
-data/
+# CIFAR-100 download (anchored: ropart/scripts/data/ holds committed figure
+# source data and must not be caught by this rule)
+/data/
 
 # Python bytecode caches
 __pycache__/

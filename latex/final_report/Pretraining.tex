@@ -4,95 +4,428 @@
 
 \begin{document}
 \ourchapter{Pretraining}\label{ch:pretraining}
+This chapter covers pretraining of the models. Everything measured in this chapter is measured on the pretext task the encoder was trained on. Finetuning performance will be described entirely in \cref{ch:downstream}. This chapter is split into two parts: 
+\begin{itemize}
+\item \cref{sec:does-dphi-learn} is presented chronologically and describes a series of experiments designed to cover each validity threat and arrive at the answer to the question: Does \dphi{} learn?
+\item \cref{sec:matched-budget} sets out to measure the cost of learning rotations. 
+\end{itemize}
 
-\stub{Chapter preamble: this chapter covers the pretext task end to end. It first
-asks whether the \dphi{} signal exists at all, and whether an apparent positive is
-genuine relative orientation or the interpolation artefact
-(\cref{sec:does-dphi-learn}); it then measures what the signal costs under
-controlled, budget-matched conditions, and produces the four converged encoders
-every downstream measurement in \cref{ch:downstream} is run on
-(\cref{sec:matched-budget}). The first half is presented chronologically because
-the chronology is the argument --- each experiment was designed to close the
-previous one's threat to validity --- and the second half is what that arc makes
-it legitimate to measure.}
+\cref{sec:does-dphi-learn} is presented chronologically, including a verdict that is reached, retracted under its own control, and then reinstated once the control's confound is isolated. Note that \cref{sec:does-dphi-learn} has to establish that the models have genuinely learned relative orientation and not the interpolation signature - if that were not the case, \cref{sec:matched-budget}'s measurements would be measurements of blur. The \cref{sec:does-dphi-learn} story starts on CIFAR-100 / ViT-S with $P\leq 8$ and moves to ImageNet-100 / VIT-B/32 at $P=32$ once recoverability turns out to be the binding constraint. \cref{sec:matched-budget} provides four converged, budget-matched encoders: 
+\begin{itemize}
+\item baseline
+\item rotated-pixels-unsupervised
+\item RoPART $\pm30^\circ$
+\item RoPART $\pm90^\circ$
+\end{itemize}
+Those encoders will then be used downstream in \cref{ch:downstream}. Note that each next model differs from the previous by a single factor - this will enable proper attribution to either rotation working as augmentation or supervision of rotation actually increasing the performance. 
+
+This chapter establishes that the signal at $P=32$ is genuine - it legitimises the results of the matched-budget study. The study then leaves four pretrained models ready to be finetuned. Importantly, it does not say a word whether \dphi{} is worth supervising - that will be answered in \cref{ch:downstream}.
 
 % =====================================================================
 \section{Does relative orientation learn?}\label{sec:does-dphi-learn}
 % =====================================================================
+The question whether \dphi{} learns is actually two questions that have to be answered in order. The first question is whether there exists a recoverable relative orientation signal at all. The second question (which can only be answer following a positive answer to the first) is: when something looks positive, is it genuine geometry or the resampling signature?
+
+Note that every number is stated agains a mean-predictor floor and the floor varies with angle range (\texttt{ang\_err}$\approx 20^\circ$ at $\pm30^\circ$ and $90^\circ$ for full circle and quad variants). Also note that translation is tracked in every run along with rotation - indeed, translation collapse was one of the symptoms that led to the diagnosis and eventual solution. Below, \cref{tab:diagnostic-arc} describes each section's experiment and its details.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The diagnostic arc]{The chronological arc of \cref{sec:does-dphi-learn}, and what
+  each step was designed to rule out. Angular errors are dense per-pair MAE on the validation split against the
+  mean-predictor floor for that angle regime (\cref{sec:protocol-and-metrics}). \Cref{sec:arc-establishes} adds no runs of its own.}
+  \label{tab:diagnostic-arc}
+  \footnotesize
+  \begin{tabular}{@{}l >{\raggedright\arraybackslash}p{0.145\textwidth}
+                       >{\raggedright\arraybackslash}p{0.175\textwidth}
+                       >{\raggedright\arraybackslash}p{0.235\textwidth}
+                       >{\raggedright\arraybackslash}p{0.275\textwidth}@{}}
+    \toprule
+    & Data / backbone / $P$ & Rotation & Designed to rule out & Outcome \\
+    \midrule
+    \cref{sec:correctness-gate}
+      & CIFAR-100, ViT-S, $P = 4, 8$
+      & none (axis-aligned), $c = 2$
+      & an error in the pretext pipeline or the relative head
+      & learns; \py{mse\_x/y} at $0.34\times / 0.21\times$ floor, negative symmetry
+        $\approx 0.03$ \\
+    \addlinespace
+    \cref{sec:first-negative}
+      & CIFAR-100, ViT-S, $P = 4$
+      & full circle, raw, $w_\varphi = 1$
+      & faulty wiring or a dead gradient path, via the single-batch overfit harness
+      & rotation flat at $88.8^\circ$ (floor $90^\circ$); translation collapses with
+        it to $1.00\times$ floor \\
+    \addlinespace
+    \cref{sec:recoverability}
+      & CIFAR-100, ViT-S, $P = 8$
+      & full circle, raw
+      & too little orientation-bearing content per patch
+      & $84.4^\circ$, flat from epoch 0; translation still collapses \\
+    \addlinespace
+      & IN-100, ViT-B, $P = 16$
+      & $\pm 30^\circ$ and quad, raw, variance-balanced
+      & the interpolation confound, which exact \py{rot90} removes by construction
+      & every probe exactly at its own floor ($19.9^\circ$ against $20.0^\circ$) \\
+    \addlinespace
+    \cref{sec:p32-unlock}
+      & IN-100, ViT-B, $P = 32$
+      & $\pm 30^\circ$, $\pm 60^\circ$ and quad, raw, variance-balanced
+      & recoverability as the binding constraint
+      & $\pm 30^\circ$: $7.17^\circ$ against a $19.96^\circ$ floor, translation
+        $0.10\times$ floor, all four gates pass. Quad stays at floor \\
+    \addlinespace
+    \cref{sec:adjudication}
+      & IN-100, ViT-B, $P = 32$
+      & $\pm 30^\circ$, supersample $\times 4$, $w_\varphi = 1$
+      & the interpolation signature as the source of that positive
+      & total collapse on every channel, translation included \\
+    \addlinespace
+    \cref{sec:reversal}
+      & IN-100, ViT-B, $P = 32$
+      & $\pm 30^\circ$; supersample and raw, $w_\varphi = 0.1$; plus \py{ss\_ch2}
+      & optimisation drag as the cause of that collapse
+      & blur-removed $10.28^\circ$ vs raw $10.43^\circ$; \py{ss\_ch2} recovers
+        translation at $0.13\times$ floor \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \subsection{The correctness gate}\label{sec:correctness-gate}
-\stub{The translation-only baseline reproducing PART's behaviour, with translational
-negative symmetry as the gate. Nothing that follows is interpretable without this.}
+
+The goal of this job to establish a demonstrably learning translation-only control. This experiment is simply a gate to progress further. The configuration is tracking the upstream paper closely: CIFAR-100, ViT-S, $P=4,8$, $c=2$, off-grid sampling, cross-attention head, no position embeddings, 64 pairs, batch size of 128, learning rate of $5 \times 10^{-4}$, 5-epoch warm-up, 100 epochs. Note that any CIFAR-100 job inherits this config. To deem this experiment a success, we want the negative symmetry gate to pass.
+
+The first run failed to learn and collapsed to a mean-predictor not really moving from the floor. With infrastructure issues ruled out a single-batch overfit harness was introduced to check if the model was wired correctly. On a single batch, a correctly wired model should overfit a single batch quickly. After running the harness separately for query type \texttt{positional} and \texttt{patch\_cat} we obtained \cref{tab:overfit-query}:
+
+\begin{table}[htbp]
+  \centering
+  \caption[The single-batch overfit discriminator]{Overfitting one fixed batch,
+  400 steps, fp32, no learning-rate schedule, loss floor $\approx 8.68$. The rising
+  \py{grad\_norm} is the positive signature: the flat trace opposite it is not a
+  healthy small gradient but an absent one.}
+  \label{tab:overfit-query}
+  \footnotesize
+  \begin{tabular}{@{}l r r r l l@{}}
+    \toprule
+    Query & Step 0 & Step 200 & Step 400 & \py{grad\_norm} & Verdict \\
+    \midrule
+    \py{positional} (upstream default) & 8.73 & 8.67 & 8.00   & 0.5--1.8, flat & cannot overfit \\
+    \py{patch\_cat} (ours)             & 8.72 & 1.96 & 0.095  & 0.75 $\rightarrow$ 6.7 & learns cleanly \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\texttt{positional} gives the lone attention layer a content-free 2-D sinusoidal query for the pair $(i,j)$ and a 1-D sinusoidal key basis (\cref{eq:query-positional}). Before it can read anything it has to match query to keys to attend onto exactly slots $i$ and $j$. Because that routing never forms, attention stays diffuse. \texttt{patch\_cat} puts patches' features in the query and as a consequence the quantity is directly computable (\cref{eq:query-patchcat}). Note that the authors of PART~\cite{part} swept both options and choosing to start with \texttt{positional} was due to \texttt{positional} being the default option in the upstream codebase script. Furthermore, \texttt{patch\_cat} injects no positional codes into the head so relative geometry is purely inferred - this is more faithful to the no-position-embeddings premise.
+
+After changing the query type, the model learned translation with \py{mse\_x/y} at $0.34\times / 0.21\times$ floor, negative symmetry $\approx 0.03$. Three results from passing this gate:
+\begin{enumerate}
+\item The code is faithful to upstream and the head learns rotation.
+\item The floors, intrinsic metrics, and gates are correct - this gives us more certainty when interpreting rotation floors later.
+\item The fixed positional query does not learn the pretext task on CIFAR-100.
+\end{enumerate}
+
 
 \subsection{The first negative: raw rotation at \texorpdfstring{$P=4$}{P=4}}\label{sec:first-negative}
-\stub{Rotation pinned at the mean-predictor floor, and translation collapsing with
-it. The single-batch overfit harness separates task from wiring: the model fits
-memorisable labels, so the failure is recoverability, not a bug.}
+With the baseline established, the next step was to begin adding rotation as a channel for supervision. $c=4$ with full-circle continuous 
+$\varphi$, $w_{xy}=w_\varphi=1$. The remainder of the config remained unchanged. After 99 epochs, angle error moved from $89.4^\circ$ to $88.8^\circ$. The loss remained flat throughout. \texttt{mse\_x} and \texttt{mse\_y} remained at $1.00\times$ and $0.92\times$ floor, respectively. This is a complete failure and once again overfit harness was used to rule out wiring issues - none were found. With loss, query type, and LR warm-up/starvation issues ruled out, the small patch size was designated as a suspect.
+
 
 \subsection{Recoverability: \texorpdfstring{$P=8$}{P=8} and the quad probes}\label{sec:recoverability}
-\stub{More orientation-bearing content per patch barely moves rotation off chance.
-The discrete-quad probes, which are confound-free by construction, sit at floor too.}
+In this set of experiments, the patch size $P$ saw an increase to $P=8,16$. First CIFAR-100 with ViT-S and $P=8$ and $c=2$ (no rotation) was trained as a control. Increasing the patch size improved translation performance: \texttt{mse\_x/mse\_y} $0.22\times / 0.14\times$ floor (vs $0.34\times / 0.2\times$ at $P=4$). Next, rotation was added and \texttt{ang\_err} moved from $P=4$'s $88.8^\circ$ to $84.4^\circ$. Unfortunately, \texttt{rot\_mse} stayed at the floor and translation collapsed again. It is entirely possible that the $5^\circ$ move can be due to the model learning the blur shortcut.
+
+With patch size still suspicious, a decision to switch from CIFAR-100 to ImageNet-100 was made. CIFAR's $32\times32$ images do not permit for much larger patch sizes. ImageNet's photographs are of larger resolution (bigger than $32\times32$) and after resizing to $224\times224$ will be the dataset used in all the remaining pretraining experiments. Furthermore, with the switch to larger patches, ViT-B will take over from ViT-S.
+
+The first model to try out $P=16$ also introduced rotation bounds. Hypothesising that rotation destroys the translation signal as well when rotations are large, the next raw-rotation model only solves the pretext task where the patches can only have rotation in $\pm30^\circ$. Even with a bigger model, smaller rotations, and patches at $P=16$. None of the channels move off the floor.
+
+With interpolation artefacts being a possible confound, a new model taking inspiration from RotNet~\cite{rotnet} was proposed and named \texttt{quad}. As in RotNet, rotations are modelled discretely, at $0^\circ,90^\circ,180^\circ,270^\circ$. This eliminates interpolation artefacts and one could argue that this 4-way classification is a simple task than continuous regression (on the other hand, this is a full rotation range which can flip patches upside down). Still, the model was unable to move off the floor in any channel. This result suggests that it was not the interpolation confound that was driving the \emph{negative} results.
+
+The results of this section are summarised in \cref{tab:recoverability-probes}:
+
+\begin{table}[htbp]
+  \centering
+  \caption[The recoverability probes]{Every probe in \cref{sec:recoverability} at
+  epoch 99, validation split. Rotation is read against its \emph{own}
+  distribution-dependent floor (\cref{eq:ang-floor}: the bounded $\pm 30^\circ$ arm's
+  \py{rot\_mse} of $0.168$ is a floor value, not an $83\%$ improvement on $1.0$.}
+  \label{tab:recoverability-probes}
+  \footnotesize
+  \begin{tabular}{@{}l l r r r r r@{}}
+    \toprule
+    & & \multicolumn{4}{c}{Rotation channel} & Translation \\
+    \cmidrule(lr){3-6} \cmidrule(l){7-7}
+    Rotation & Data / backbone / $P$ & \py{ang\_err} & floor & \py{rot\_mse} & floor
+      & \py{mse\_x} / floor \\
+    \midrule
+    none ($c = 2$)      & CIFAR-100, ViT-S, $P = 8$  & ---            & ---              & ---     & ---     & $\mathbf{0.22\times}$ \\
+    full circle, raw    & CIFAR-100, ViT-S, $P = 8$  & $84.4^\circ$   & $90.0^\circ$     & $0.994$ & $1.000$ & $1.00\times$ \\
+    quad                & CIFAR-100, ViT-S, $P = 8$  & $83.7^\circ$   & $90.0^\circ$     & $0.940$ & $1.000$ & $1.00\times$ \\
+    \addlinespace
+    none ($c = 2$)      & IN-100, ViT-B, $P = 16$    & ---            & ---              & ---     & ---     & $\mathbf{0.15\times}$ \\
+    $\pm 30^\circ$, raw & IN-100, ViT-B, $P = 16$    & $19.9^\circ$   & $19.96^\circ$    & $0.168$ & $0.169$ & $1.00\times$ \\
+    quad                & IN-100, ViT-B, $P = 16$    & $89.6^\circ$   & $90.0^\circ$     & $1.000$ & $1.000$ & $1.00\times$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+While the results in this section are overwhelmingly negative, one ray of sunshine in the form of the CIFAR-100 $P=8$ result shines as increasing the patch-size to image-size ratio improved translation performance. We need to go bigger.
+
 
 \subsection{Large patches unlock \texorpdfstring{\dphi}{the orientation channel}}\label{sec:p32-unlock}
-\stub{At \(P=32\), bounded \(\pm 30^\circ\) rotation learns and passes the intrinsic
-gates --- the first positive, and the point at which the confound stops being
-hypothetical.}
+In this section, $P=32$ is introduced for $\pm30^\circ, \pm60^\circ$, and \texttt{quad} variants. All models use a variance-balanced loss. The headline result it the $\pm30^\circ$ achieves dense angular MAE of $7.17^\circ$ compared to $19.96^\circ$ floor. Even more importantly, translation survives at $0.10\times$ of the floor. Furthermore, \texttt{val/ang\_err} falls monotonically over epochs. Finally, the structural gates are passed (see \cref{tab:gates-p32-b30}).
+
+
+\begin{table}[htbp]
+  \centering
+  \caption[The intrinsic gates at $P = 32$]{Bounded $\pm 30^\circ$ at $P = 32$, scored on
+  the IN-100 validation split at epoch 99 over all $49 \times 49$ ordered pairs. Three of
+  the four conjuncts of \cref{eq:positive-criterion} are met. The fourth conjunct - survives control
+  (c) - is not tested here. A model reading the
+  per-patch resampling signature as a proxy for each patch's absolute $\varphi_i$ and then
+  differencing it would satisfy every row of this table exactly as well. The invariants
+  certify the structure of what was learned, but not the source.
+  \Cref{sec:adjudication} supplies the missing control.}
+  \label{tab:gates-p32-b30}
+  \footnotesize
+  \begin{tabular}{@{}l l r r l@{}}
+    \toprule
+    Gate & Quantity & Translation & Rotation & Want \\
+    \midrule
+    \multirow{2}{*}{(1) beats the floor}
+      & $\mathrm{MAE}_\varphi$ vs $\tfrac{2}{3}a$ (\cref{eq:ang-floor})
+        & ---                        & $7.17^\circ$ / $19.96^\circ$ & $\ll$ floor \\
+      & floor ratio (\cref{eq:metric-floor-ratio})
+        & $0.096\times$ / $0.058\times$ & $0.165\times$             & $< 1$ \\
+    \addlinespace
+    (2) identity
+      & $\mathrm{Id}_{xy}$, $\mathrm{Id}_{\mathrm{rot}}$ (\cref{eq:metric-identity})
+        & $1.39$ px                  & $0.019$                      & $\to 0$ \\
+    \addlinespace
+    (3) negative symmetry
+      & $\rho^{\mathrm{sym}}$ (\cref{eq:metric-negsym-xy}, \cref{eq:metric-negsym-rot})
+        & $0.030$                    & $0.008$                      & $\to 0$ \\
+    \addlinespace
+    (4) composition
+      & $\rho^{\mathrm{comp}}_{xy}$, $\mathrm{MAE}^{\mathrm{comp}}_{\mathrm{rot}}$
+        (\cref{eq:metric-comp-xy}, \cref{eq:metric-comp-rot})
+        & $0.026$                    & $0.44^\circ$                 & $\to 0$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+Also encouraging is the $\pm60^\circ$ result which achieves $10.4^\circ$ against a $40^\circ$ floor with translation again at $0.10\times$ of the floor and all gates passing. This result may also that wider rotation range comes at a cost. Finally, a \texttt{quad} model was trained and it failed to move from the floors. This may suggest that rotation magnitude plays a role whether content survives the rotation.
+
+With the first signs that rotation can be learned we now turn our attention to the confound so that we can establish that it is actual geometry that is driving the learning.
 
 \subsection{Adjudicating the interpolation confound}\label{sec:adjudication}
-\stub{Blur removal collapses the positive to floor on every channel. The extraction,
-statistics and gradients are all exonerated, so the collapse is read as a result:
-the signature was doing the work.}
+To control for the blur we use supersampling as described in \cref{sec:interpolation-controls}. All the runs will be scored against the $19.96^\circ$ floor. With supersampling enabled and the blur signature removed, the model now collapses back to the floor. Notably, it still passes the rotation symmetry and composition gates because a constant input satisfies them trivially. Once again, gates check structure not source. Note that blur removal also decimated translation performance. The angular error remained at floor and so did the translation error. Interestingly \texttt{train/loss} remained pinned at $~2.0$ which is the two-groups-at-floor value under variance balancing. It decomposes into rotation group contributing a full unit of unsatisfiable loss every epoch. It is also unstable, with spikes at epochs 37 and 45 and with \texttt{grad\_norm} at 387 at epoch 99 (compared to healthy $<1$). There are two possibilities left: either it is the rotated-pixels nuisance or something in the optimisation process. The first not very plausible as removing a rotation shortcut should keep translation unchanged. Using the overfit harness on a single batch showed that at initialisation, the head outputs $\approx 0$ while $\cos\Delta\varphi$ has mean $\approx0.93$ with small variance over a bounded range. Dividing by that variance amplifies an $O(1)$ offset $50-90\times$, resulting in initial loss of $40-49$ and gradient norms of $350-1400$. This suggests that variance-balanced rotation group can dominate the optimisation of the shared trunk. This is exactly the case as mentioned in \cref{sec:angle-representation}. The fix is to divide the each group's error by its own floor. While an unsatisfiable group does not fade it it allows to ``turn down the volume'' on a loud unlearnable channel. The next section directly tests the fix.
 
 \subsection{The reversal: isolating optimisation drag}\label{sec:reversal}
-\stub{Down-weighting the rotation group separates \emph{signal absent} from
-\emph{optimisation collapsed}. With the drag controlled, blur-removed rotation
-learns identically to raw --- the signature verdict does not survive, and the
-positive is genuine.}
+The first step to investigate whether the rotation channel is the culprit is to remove it. This is exactly the point of the \texttt{ss\_ch2} which is a supersampled-no-rotation-supervised run. If translation recovers, the group is the culprit, not the pixels. The next two runs reintroduce rotation, with both raw and supersampled variants. Importantly, both models set $w_\varphi = 0.1$. If rotation now learns it was the drag that was causing the issues and the difference between the two runs should extract the difference due to supersampling only. 
+
+First, \texttt{ss\_ch2} recovers translation at $0.13\times$ of the floor. It also passes the gates even though the pixels were supersampled. Now let us add properly-weighed rotation channel back in. The results are promising, both \texttt{ss} and \texttt{raw} variants reach just above $10^\circ$ angular MAE (at half the floor) with supersampled variant actually performing marginally better on rotation. Both are at $0.12\times$ of the translation floor and pass the structural gates. These results show that rotation can be learned if the loss is properly weighed and that supersampling has a negligible impact on performance. See \cref{tab:deconfound-triple} for a summary of results:
+
+\begin{table}[htbp]
+  \centering
+  \caption[The deconfounding triple]{The three deconfounding arms, scored on the IN-100
+  validation split at epoch 99 over all $49 \times 49$ ordered pairs; quantities are as
+  defined in \cref{tab:gates-p32-b30}, and floor ratios use each run's own floors.}
+  \label{tab:deconfound-triple}
+  \footnotesize
+  \begin{tabular}{@{}l l r r r@{}}
+    \toprule
+    & & \py{ss} & \py{raw} & \py{ss\_ch2} \\
+    Gate & Quantity & $w_\varphi = 0.1$ & $w_\varphi = 0.1$ & $c = 2$ \\
+    & & blur removed & signature present & rot.\ unsupervised \\
+    \midrule
+    \multirow{4}{*}{(1) beats the floor}
+      & angular MAE (floor $19.96^\circ$) & $\mathbf{10.28^\circ}$ & $\mathbf{10.43^\circ}$ & --- \\
+      & \py{mse\_x} / floor               & $0.125\times$ & $0.127\times$ & $0.132\times$ \\
+      & \py{mse\_y} / floor               & $0.071\times$ & $0.073\times$ & $0.078\times$ \\
+      & translation RMSE                  & $32.29$ px & $32.67$ px & $33.44$ px \\
+    \addlinespace
+    \multirow{2}{*}{(2) identity}
+      & $\mathrm{Id}_{xy}$                & $1.10$ px & $1.14$ px & $1.17$ px \\
+      & $\mathrm{Id}_{\mathrm{rot}}$      & $0.028$ & $0.030$ & --- \\
+    \addlinespace
+    \multirow{2}{*}{(3) negative symmetry}
+      & $\rho^{\mathrm{sym}}_{xy}$        & $0.026$ & $0.027$ & $0.028$ \\
+      & $\rho^{\mathrm{sym}}_{\mathrm{rot}}$ & $\mathbf{0.0115}$ & $\mathbf{0.0119}$ & --- \\
+    \addlinespace
+    \multirow{2}{*}{(4) composition}
+      & $\rho^{\mathrm{comp}}_{xy}$       & $0.022$ & $0.023$ & $0.022$ \\
+      & $\mathrm{MAE}^{\mathrm{comp}}_{\mathrm{rot}}$ & $\mathbf{0.63^\circ}$ & $\mathbf{0.66^\circ}$ & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+These results show that rotation is learnable with blur removed and that it was the drag that was causing the collapse in \cref{sec:adjudication}.
 
 \subsection{What the arc establishes}\label{sec:arc-establishes}
-\stub{The claim this half of the chapter supports, stated no more strongly than the
-evidence allows, and the loose end that remains: signature removal is near-total,
-not total.}
+The first part of this chapter therefore establishes that rotation bounded at $\pm30^\circ$ is learnable on ImageNet-100 data with $P=32$. An important knob to tune is $w_\varphi=0.1$ which removes the drag. This section focused on the diagnostics, the next one takes the settings that survived and will compare them at a matched budget.
 
 % =====================================================================
 \section{The matched-budget pretext study}\label{sec:matched-budget}
 % =====================================================================
 
-\stub{Section preamble: with the signal established, the remainder of the chapter
-measures what it costs under controlled conditions.}
+With ``does rotation learn?'' question answered we now turn our attention to how much it costs. We measure two costs: structural consistency and translation performance. The runs in the previous section were not meant to be compared, each run was designed to solve one defined issue. This section will focus on four arms that will be compared against one another. The key is that when ordered, they each differ from the previous one by a single factor.
+\begin{enumerate}
+\item \emph{baseline}: Pixels are not rotated (and therefore rotation is not supervised),
+\item \emph{rotated-pixels-unsupervised}: Pixels are rotated (within a $30^\circ$ boundary) but rotation is not supervised; $c=2$,
+\item \emph{RoPART} $\pm30^\circ$: Pixels are rotated within a $30^\circ$ boundary and rotation is supervised; $c=4$,
+\item \emph{RoPART} $\pm90^\circ$: Pixels are rotated within a $90^\circ$ boundary and rotation is supervised; $c=4$,
+\end{enumerate}
+Note that 1. and 2. tease out the effect of just rotating pixels (a simple data augmentation) whereas 2. and 3. (or 4.) tease out the effect of supervising the rotation. All rotated arms use supersampling.
 
 \subsection{Why matched budgets}\label{sec:why-matched-budgets}
-\stub{The convergence confound: an arm that is merely slower looks like an arm that
-is worse. The stand-down that followed, and what a matched budget has to rule out.}
+A confound that appears when answering this question is that a model that is merely slower (as was the case in the PART method when aspect ratio and scale were added~\cite{part}) may look like it performs worse. If we do not allow for convergence we are comparing schedules rather than arms. For example, 100-epoch comparison between $\pm30^\circ$ and $\pm90^\circ$ found that rotation range increase degraded performance. But looking at the training loss curve (\cref{fig:convergence-confound}), narrower models learned quicker but all three were still learning when the schedule ran out. 
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{convergence_confound.pdf}
+  \caption[The convergence confound]{Why the 100-epoch range comparison could not be
+  read as a cost of rotation range. \emph{Upper:} per-epoch training loss for the three
+  bounded arms (ViT-B/32, IN-100, $P = 32$, supersample, $w_\varphi = 0.1$, identical
+  schedule). The dashed rule is the $\pm 90^\circ$ arm's \emph{final} value, $0.2259$;
+  the $\pm 30^\circ$ arm passes through it at epoch $56$, so the wider arm ends where the
+  narrower one stood at $56\%$ of the budget. Over the shaded final ten epochs
+  $\pm 30^\circ$ is still falling $5.3\%$. \emph{Lower:} the cosine learning rate, already
+  at \py{min\_lr} while the loss is still descending. The flattening at the right
+  of the upper panel is therefore the \emph{schedule} terminating, not convergence.}
+  \label{fig:convergence-confound}
+\end{figure}
+
+To progress, two things are needed: 1) a converged pair of rotation-enabled models, 2) A $P=32$ baseline with translation only as all the numbers quoted so far we compared to the floor. Note that the baseline uses the same \texttt{mse/var} loss normalisation as the rotated versions so the numbers are directly comparable.
+
 
 \subsection{Design: four arms, one factor per step}\label{sec:four-arms}
-\stub{Baseline, rotated pixels unsupervised, RoPART \(\pm 30^\circ\), RoPART
-\(\pm 90^\circ\). Each step changes exactly one thing, which is what makes a later
-downstream difference attributable to the \dphi{} target rather than to rotated
-patches acting as augmentation.}
+We will briefly go into more detail on the design of the four arms and their aims (see \cref{tab:matched-arms}). The jump from 1. to 2. aims to isolate the effect of rotation as a data-augmentation technique. Note that rotation is not the only difference as the margin also changes as explained in \cref{eq:rot-window}. However, because the results are reported as a fraction of the floor (which also changes with the margin) they can still be compared. What cannot be compared are the raw losses. Jumping from 2. to 3. or 4. we extract the effect of supervising varying degrees of rotation. Note that 2. already played a role in \cref{sec:reversal} where it removed drag. Now, it plays a role of augmentation control.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The four matched-budget arms]{The four arms as run. Everything not listed is
+  held fixed: ViT-B/32 at $224$ px, IN-100, $P = 32$, bf16, \py{--loss-balance variance},
+  \py{--clip-grad 1.0}, \py{num\_pairs}$= 2048$, batch $192$, \py{patch\_cat} query,
+  250 epochs, \py{--save-every 50}, and the \py{supersample}$\times 4$ extractor wherever
+  rotation applies.}
+  \label{tab:matched-arms}
+  \footnotesize
+  \begin{tabular}{@{}l l c c c c c c r@{}}
+    \toprule
+    & & rotates & rot. & & & & & \\
+    Arm & \py{OUT\_NAME} & pixels & superv. & range & $c$ & $w_\varphi$ & $m$ & wall \\
+    \midrule
+    1. baseline
+      & \py{in100\_translation\_p32\_e250}
+      & no  & ---  & ---            & 2 & ---   & 0 & 12.9 h \\
+    2. rotated-pixels-unsup.
+      & \py{...\_bounded30\_p32\_ss\_ch2\_e250}
+      & yes & no   & $\pm 30^\circ$ & 2 & ---   & 7 & 32.2 h \\
+    3. RoPART $\pm 30^\circ$
+      & \py{...\_bounded30\_p32\_ss\_wphi01\_e250}
+      & yes & yes  & $\pm 30^\circ$ & 4 & $0.1$ & 7 & 28.6 h \\
+    4. RoPART $\pm 90^\circ$
+      & \py{...\_bounded90\_p32\_ss\_wphi01\_e250}
+      & yes & yes  & $\pm 90^\circ$ & 4 & $0.1$ & 7 & 31.8 h \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Note that matched means matched on epochs, not on wall-clock time (note that baseline ran on an A40 and the others on A100s).
 
 \subsection{Convergence and pretext performance}\label{sec:convergence}
-\stub{Training behaviour across the four arms at matched budget, and confirmation
-that each has converged rather than merely stopped.}
+After pretraining the four arms for 250 epochs, we wanted to see the loss stop moving while the LR is at its floor. Looking at \cref{fig:matched-budget-curves}, each harm more than halved its loss beyond epoch 100, and the residual descent over the final 10 epochs is $1.9-2.7\%$ agains $5.3\%$ from before. While it is $2.5\times$ closer to flat it is not flat so the best we can say is that the models are substantially converged, and - more importantly - converged to the same \emph{degree} as one another. All the runs were healthy, with reasonable \texttt{grad\_norm<0.55} throughout. It is important not to read raw final losses as they are not directly comparable. Floor-normalised metrics are provided in \cref{tab:matched-gates} and allow for comparisons.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{matched_budget_curves.pdf}
+  \caption[The four arms over 250 epochs]{\emph{Upper:} comparison run to 250 epochs. The
+  dashed rule marks where the stood-down comparison of \cref{fig:convergence-confound}
+  ended. \emph{Inset:} the tail on a linear axis. The curves are far
+  closer to flat than at 100 epochs, but they are not exactly flat. \emph{Lower:} the cosine schedule,
+  at \py{min\_lr} well before the end.}
+  \label{fig:matched-budget-curves}
+\end{figure}
+
+
+\begin{table}[htbp]
+  \centering
+  \caption[The four arms at matched budget]{Intrinsic evaluation of the four arms at
+  epoch 249, IN-100 validation, all $49 \times 49$ ordered pairs; quantities as defined in
+  \cref{tab:gates-p32-b30}. Floor ratios use each arm's own floor, and those floors differ. Raw pixel error flatters the rotation
+  arms and the normalised columns are the ones to read. Note the rotation channel's \% of floor: $\pm 90^\circ$ has the larger absolute angular error but the \emph{smaller} fraction of its own floor.}
+  \label{tab:matched-gates}
+  \footnotesize
+  \begin{tabular}{@{}l l r r r r@{}}
+    \toprule
+    & & & rot.\ pixels & RoPART & RoPART \\
+    Gate & Quantity & baseline & unsuperv. & $\pm 30^\circ$ & $\pm 90^\circ$ \\
+    \midrule
+    \multirow{3}{*}{(1) beats the floor}
+      & \py{mse\_x} / floor   & $7.23\%$ & $7.51\%$ & $\mathbf{6.65\%}$ & $12.80\%$ \\
+      & \py{mse\_y} / floor   & $4.16\%$ & $4.58\%$ & $\mathbf{4.12\%}$ & $7.61\%$ \\
+      & translation RMSE      & $26.59$ px & $25.40$ px & $\mathbf{23.98}$ px & $33.02$ px \\
+    \addlinespace
+    (2) identity
+      & $\mathrm{Id}_{xy}$    & $1.014$ px & $0.978$ px & $0.928$ px & $1.244$ px \\
+    (3) negative symmetry
+      & $\rho^{\mathrm{sym}}_{xy}$  & $2.136\%$ & $2.271\%$ & $2.282\%$ & $3.261\%$ \\
+    (4) composition
+      & $\rho^{\mathrm{comp}}_{xy}$ & $1.618\%$ & $1.724\%$ & $1.861\%$ & $2.921\%$ \\
+    \midrule
+    \multirow{4}{*}{rotation channel}
+      & angular MAE           & --- & --- & $7.95^\circ$ & $17.41^\circ$ \\
+      & \quad against floor   & --- & --- & $19.96^\circ$ & $59.89^\circ$ \\
+      & \quad as \% of floor  & --- & --- & $39.8\%$ & $\mathbf{29.1\%}$ \\
+      & $\mathrm{Id}_{\mathrm{rot}}$ & --- & --- & $0.0196$ & $0.1331$ \\
+      & $\rho^{\mathrm{sym}}_{\mathrm{rot}}$ & --- & --- & $1.031\%$ & $6.129\%$ \\
+      & $\mathrm{MAE}^{\mathrm{comp}}_{\mathrm{rot}}$ & --- & --- & $0.54^\circ$ & $2.73^\circ$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The most important points from the table are:
+\begin{itemize}
+\item All four arms stay away from the floor and pass the structural gates.
+\item Both RoPARTs learn orientation: $7.95^\circ$ against a $19.96^\circ$ floor and $17.41^\circ$ against $59.89^\circ$ for $\pm30^\circ$ and $\pm90^\circ$ respectively.
+\item RoPART $\pm30^\circ$ has the best translation out of the four arms.
+\end{itemize}
 
 \subsection{The cost of rotation range}\label{sec:range-cost}
-\stub{The intrinsic gates across \(\pm 30^\circ\) and \(\pm 90^\circ\). The gaps
-survive budget matching, so the graded degradation is a property of the task ---
-and, floor-normalised, the wider range is a trade rather than a failure.}
+We noted previously that at 100 epochs, the model with a wider rotation bound performed worse on both translation and rotation. The question now is what this gap looks like after 250 epochs. If the gaps are a budget artefact, extra budget should move them towards $1\times$; if they are a property of the task, they will persist.
+
+Indeed, with 150 more epochs, every gate improved for both RoPARTs. However, they improved in lockstep - the gap was still sizeable even when the models were better converged. See \cref{tab:range-gap} for a full summary:
+
+\begin{table}[htbp]
+  \centering
+  \caption[The range gap survives budget matching]{The $\pm 90^\circ$ penalty at the
+  stood-down 100-epoch budget and at the matched 250-epoch budget.} 
+  \label{tab:range-gap}
+  \footnotesize
+  \begin{tabular}{@{}l r r c r r c@{}}
+    \toprule
+    & \multicolumn{3}{c}{100 epochs (stood down)} & \multicolumn{3}{c}{250 epochs (matched)} \\
+    \cmidrule(lr){2-4} \cmidrule(l){5-7}
+    Gate & $\pm 30^\circ$ & $\pm 90^\circ$ & gap & $\pm 30^\circ$ & $\pm 90^\circ$ & gap \\
+    \midrule
+    $\mathrm{Id}_{\mathrm{rot}}$                   & $0.028$  & $0.202$  & $7.2\times$ & $0.0196$ & $0.1331$ & $\mathbf{6.8\times}$ \\
+    $\rho^{\mathrm{sym}}_{\mathrm{rot}}$           & $1.15\%$ & $8.51\%$ & $7.4\times$ & $1.031\%$ & $6.129\%$ & $\mathbf{5.9\times}$ \\
+    $\mathrm{MAE}^{\mathrm{comp}}_{\mathrm{rot}}$  & $0.63^\circ$ & $3.90^\circ$ & $6.2\times$ & $0.54^\circ$ & $2.73^\circ$ & $\mathbf{5.1\times}$ \\
+    \py{mse\_x} / floor                            & $12.5\%$ & $24.7\%$ & $2.0\times$ & $6.65\%$ & $12.80\%$ & $\mathbf{1.9\times}$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The conclusion? All gates falsify the hypothesis that the gaps were driven by lack of convergence - the degradation is a property of the task. Note that the gaps do narrow slightly so a small part of the initial gap may have been convergence-related. While the structural gates are looser for the wider range, the rotation performance \emph{relative to the difficulty of the task i.e. compared to the floor} is better for wider bound. It is not the case that ``wider is simply worse'', it is more appropriate to say that widening the range makes the model learn orientation more effectively at the cost of structural correctness and translation performance. Note that both RoPARTs used the same $w_\varphi = 0.1$ and perhaps tuning it differently for each model would affect the gap.
 
 \subsection{The pretext-level no-degradation check}\label{sec:no-degradation-pretext}
-\stub{Adding the \dphi{} target does not cost translation. States plainly that this
-is a pretext-level result, on the task family the encoder was trained on, and so
-does not settle the downstream question.}
+Finally, we want to focus on translation performance in detail for a bit. Looking at \cref{tab:matched-gates}, one can see that RoPART$\pm30^\circ$ reaches $6.65\%$ of the translation floor compared to the $7.23\%$ of the floor for the baseline. One can also rescale the baseline by the target-spread ratio $\sqrt{6.0588/5.2111} = 1.079$ - it gives $24.66$ px, still above RoPART's $23.98$ px. Both metrics agree on the ordering. Therefore we can claim that adding a rotation target does not cost translation accuracy (it even buys a little back). Now compare among baseline, rotation-pixels-unsupervised, and RoPART$\pm30^\circ$: going from 1. to 2. negative symmetry and composition loosen a but going from 2. to 3. shows little difference. This can be interpreted that rotating pixels loosens the gates but the target costs little. This is the final result based on the pretext task and it does not tell us anything about classification degradation as that will be the focus of \cref{ch:downstream}.
 
 % =====================================================================
 \section{Discussion}\label{sec:pretraining-discussion}
 % =====================================================================
-\stub{What the arc and the four arms together can and cannot attribute: that the
-learned signal is genuine rather than the interpolation signature, which structural
-looseness tracks rotated pixels rather than the \dphi{} target itself, and why every
-claim here is pretext-level --- the downstream question is
-\cref{ch:downstream}'s.}
+This chapter set out to answer the question whether \dphi{} is learnable and if so, how much it costs. We now know that orientation is genuinely learnable at $P=32$ and at $\pm30^\circ$ supervision is free at the pretext level. Two small caveats that this chapter did not resolve are: the remaining $4\%$ supersampling signature's effect and the range cost could that be different if $w_\varphi$ were tuned further. We can now move to assessing the method on finetuning performance rather than continuing to measure it on the pretext task and structural gate.
+
+
+
 
 \ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
 \end{document}
