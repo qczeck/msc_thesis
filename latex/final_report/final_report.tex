@@ -67,6 +67,14 @@
 \setcounter{topnumber}{3}
 \setcounter{bottomnumber}{2}
 \setcounter{totalnumber}{5}
+
+% Float-only pages align to the top rather than being centred by the default
+% infinitely-stretchy \@fptop glue, which strands a lone table mid-page.
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpsep}{12pt plus 1fil}
+\setlength{\@fpbot}{0pt plus 1fil}
+\makeatother
 \usepackage{fancyhdr}
 \usepackage{cleveref}
 \usepackage{url}
@@ -226,11 +234,9 @@
 \setcounter{tocdepth}{2}
 
 \ourchapterstar{Abstract}
-%TODO: abstract --- max one page, no citations, must stand alone.
 
 \ourchapterstar{Acknowledgements}
-% Optional, but it is usual to thank your supervisor.
-
+I would like to thank Professor Josiah Wang for his supervision and support during my research. I would also like to thank my parents and my girlfriend Madzia for giving me encouragement throughout the entire course of the degree. My friends and family have my thanks for asking about my progress and for sitting through my animated explanations of self-supervised learning for non-technical audiences.
 \pagebreak
 \tableofcontents
 %I don't *think* you need these

@@ -397,55 +397,9 @@ Note that $W_{\mathrm{out}}$ is the only tensor whose shape depends on the build
 
 
 \section{Implementation}\label{sec:implementation}
-This section describes the more technical details of the implementation. The model is available as a Python package \py{ropart}. While not directly forked, it bases part of the codebase directly on PART. Additional modules were added on top of the scope of the original repository and many parts of the upstream code were modified as well. For easy comparison to baseline, setting the rotation flag off RoPART$|_{C=2}$ is the baseline computation. A suite of tests was introduced to ensure that the generated patches and targets associated with them were correct. See below for a list in \cref{tab:tests}:
+This section describes the more technical details of the implementation. The model is available as a Python package \py{ropart}. While not directly forked, it bases part of the codebase directly on PART. Additional modules were added on top of the scope of the original repository and many parts of the upstream code were modified as well. For easy comparison to baseline, setting the rotation flag off RoPART$|_{C=2}$ is the baseline computation. 
 
-
-\begin{table}[htbp]
-  \centering
-  \caption[What the test suite guarantees]{What the test suite guarantees. Each row pairs a claim
-  made in this chapter with the test that holds it; these ten are the
-  chapter-relevant subset of a 37-test suite, the remainder covering shapes,
-  registries and the evaluation utilities. Note that they are property and oracle checks, rather than
-  unit tests. The suite is run locally under MPS, it has not been run under CUDA.}
-  \label{tab:tests}
-  \footnotesize
-  \begin{tabular}{p{0.42\textwidth} l}
-    \toprule
-    Claim & Test \\
-    \midrule
-    Targets equal an independent oracle (\cref{eq:target-ropart})
-      & \py{targets\_match\_helpers\_oracle} \\
-    Identity, negative symmetry and composition hold on real batches
-    (\cref{eq:inv-identity}-\cref{eq:inv-composition})
-      & \py{invariants\_on\_batch} \\
-    \addlinespace
-    Quad rotation is an exact pixel permutation (\cref{eq:quad-k})
-      & \py{crop\_patches\_quad\_is\_exact\_rot90} \\
-    Batched extraction equals the per-patch loop (\cref{eq:inverse-warp})
-      & \py{crop\_patches\_rotated\_} \\
-      & \quad\py{batched\_equals\_loop} \\
-    Angles are drawn from the stated sets (\cref{eq:angle-sampling})
-      & \py{bounded\_rotation\_sampling} \\
-    \addlinespace
-    With rotation off the loss is unchanged (\cref{eq:loss-none})
-      & \py{loss\_balance\_default\_unchanged} \\
-    Variance balancing rescales both groups (\cref{eq:loss-variance})
-      & \py{loss\_balance\_variance\_} \\
-      & \quad\py{rescales\_groups} \\
-    $\epsilon$ prevents the small-range blow-up (\cref{eq:loss-variance})
-      & \py{loss\_eps\_guards\_small\_} \\
-      & \quad\py{variance\_blowup} \\
-    \addlinespace
-    \py{ch2} controls rotate pixels but do not supervise them
-    (\cref{sec:interpolation-controls})
-      & \py{ss\_ch2\_control\_rotates\_} \\
-      & \quad\py{but\_unsupervised} \\
-    Metrics agree with a hand-computed oracle
-    (\cref{sec:protocol-and-metrics})
-      & \py{eval\_metrics\_oracle} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+A suite of 37 tests was introduced to ensure that the generated patches and the targets associated with them were correct. These are property and oracle checks rather than unit tests - each pairs a claim made in this chapter with a test that holds it, so that the targets are checked against an independent oracle. \Cref{apx:implementation-tables} lists the chapter-relevant subset.
 
 Most differences with the PART paper relate to modifying the underlying vision transformer to work with rotation and larger patch sizes. Among other settings, a different loss was used and learning rates were adjusted. See \cref{tab:upstream-divergences} for a comprehensive list.
 
@@ -482,31 +436,8 @@ Most differences with the PART paper relate to modifying the underlying vision t
   \end{tabular}
 \end{table}
 
-Finally, adjustments were made to allow for running the code both in local development on an M1 Pro ARM-based SoC and on Department of Computing CUDA-enabled GPU boxes and GPU cluster. Most importantly, \texttt{float64} is unsupported on MPS and \texttt{randperm} with a fixed seed permutes differently per device. See \cref{tab:device-parity} below for a full overview of the differences between the two setups:
+Finally, adjustments were made to allow the code to run both in local development on an M1 Pro ARM-based SoC and on Department of Computing CUDA-enabled GPU boxes and the GPU cluster. Two device differences matter: \texttt{float64} is unsupported on MPS, and \texttt{randperm} under a fixed seed permutes differently per device, so the pair set must be held fixed by hand before any cross-device comparison. \Cref{apx:implementation-tables} gives the full parity measurement.
 
-\begin{table}[htbp]
-  \centering
-  \caption[Accelerator parity against CPU]{The same code on both accelerators, each
-  measured against its own machine's CPU reference: ViT-B/32, batch 2, $M = 2048$, with
-  the pair set held fixed so only arithmetic differs. Timing is one
-  forward--backward--step, mean of ten.}
-  \label{tab:device-parity}
-  \begin{tabular}{l l l}
-    \toprule
-                                   & MPS (Apple silicon)   & CUDA (RTX 2080 Ti, \py{gpu30}) \\
-    \midrule
-    \py{torch}                     & 2.12.1                & 2.12.1+cu130 \\
-    Max abs.\ deviation from CPU   & $6.4 \times 10^{-7}$  & $5.8 \times 10^{-7}$ \\
-    Relative deviation             & $2.9 \times 10^{-6}$  & $2.6 \times 10^{-6}$ \\
-    Loss vs CPU                    & identical (16 s.f.)   & rel.\ $1.1 \times 10^{-7}$ \\
-    \py{randperm} matches CPU      & no                    & no \\
-    \py{float64}                   & unsupported           & supported \\
-    Seconds per step               & $0.110$               & $0.038$ \\
-    \midrule
-    Role                           & development, testing   & all reported pretraining \\
-    \bottomrule
-  \end{tabular}
-\end{table}
 
 \section{Experimental infrastructure}\label{sec:infrastructure}
 The scripts were carefully designed to avoid wasting GPU time on failed runs. To achieve this, auto-resume functionality was introduced. Training scripts automatically check for \py{\{OUT\}/checkpoint.pth} and on a hit, resume from that checkpoint. There is however, a worse issue than a missing checkpoint - a truncated checkpoint may not crash the script but will nevertheless corrupt the results. To avoid this issue, atomic checkpointing was introduced. While the checkpoint is overwritten every epoch, we added functionality to save snapshots of the model every $N$ epochs. The runs were tracked semi-online using Weights and Biases in offline mode and a custom script to sync periodically. 
@@ -560,7 +491,7 @@ While pretraining ran on the SLURM cluster, both finetunes ran on DoC GPU boxes 
 \end{table}
 
 \section{Protocol and metrics}\label{sec:protocol-and-metrics}
-In total, three different datasets were used over the course of this project. Similarly to PART~\cite{part}, CIFAR-100~\cite{cifar} was used for initial development and experimentation with rotation. ImageNet-100~\cite{imagenet}, a 100-class subset of ImageNet was used for all pretraining and the classification check. Horizon Lines in the Wild~\cite{hlw} (v2 to be exact) was used for the orientation-sensitive downstream task. ViT-S was used for CIFAR, ViT-B for ImageNet and HLW.
+In total, three different datasets were used over the course of this project. Similarly to PART~\cite{part}, CIFAR-100~\cite{cifar} was used for initial development and experimentation with rotation. ImageNet-100~\cite{cmc}, a 100-class subset of ImageNet~\cite{imagenet}, was used for all pretraining and the classification check. Horizon Lines in the Wild~\cite{hlw} (v2 to be exact) was used for the orientation-sensitive downstream task. ViT-S was used for CIFAR, ViT-B for ImageNet and HLW.
 \begin{table}[htbp]
   \centering
   \caption[The three datasets]{The three datasets. Examples are single images drawn from each set:

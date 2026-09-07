@@ -6,6 +6,81 @@
 % code listings, which live in the repository.
 
 \begin{document}
+\apxsection{Implementation reference}\label{apx:implementation-tables}
+\Cref{sec:implementation} describes the test suite and the two accelerators the code was run
+on; the two tables below are the reference detail behind those descriptions.
+
+\begin{table}[htbp]
+  \centering
+  \caption[What the test suite guarantees]{What the test suite guarantees. Each row pairs a claim
+  made in \cref{ch:ropart} with the test that holds it; these ten are the
+  chapter-relevant subset of the 37-test suite, the remainder covering shapes,
+  registries and the evaluation utilities. Note that they are property and oracle checks, rather than
+  unit tests. The suite is run locally under MPS, it has not been run under CUDA.}
+  \label{tab:tests}
+  \footnotesize
+  \begin{tabular}{p{0.42\textwidth} l}
+    \toprule
+    Claim & Test \\
+    \midrule
+    Targets equal an independent oracle (\cref{eq:target-ropart})
+      & \py{targets\_match\_helpers\_oracle} \\
+    Identity, negative symmetry and composition hold on real batches
+    (\cref{eq:inv-identity}-\cref{eq:inv-composition})
+      & \py{invariants\_on\_batch} \\
+    \addlinespace
+    Quad rotation is an exact pixel permutation (\cref{eq:quad-k})
+      & \py{crop\_patches\_quad\_is\_exact\_rot90} \\
+    Batched extraction equals the per-patch loop (\cref{eq:inverse-warp})
+      & \py{crop\_patches\_rotated\_} \\
+      & \quad\py{batched\_equals\_loop} \\
+    Angles are drawn from the stated sets (\cref{eq:angle-sampling})
+      & \py{bounded\_rotation\_sampling} \\
+    \addlinespace
+    With rotation off the loss is unchanged (\cref{eq:loss-none})
+      & \py{loss\_balance\_default\_unchanged} \\
+    Variance balancing rescales both groups (\cref{eq:loss-variance})
+      & \py{loss\_balance\_variance\_} \\
+      & \quad\py{rescales\_groups} \\
+    $\epsilon$ prevents the small-range blow-up (\cref{eq:loss-variance})
+      & \py{loss\_eps\_guards\_small\_} \\
+      & \quad\py{variance\_blowup} \\
+    \addlinespace
+    \py{ch2} controls rotate pixels but do not supervise them
+    (\cref{sec:interpolation-controls})
+      & \py{ss\_ch2\_control\_rotates\_} \\
+      & \quad\py{but\_unsupervised} \\
+    Metrics agree with a hand-computed oracle
+    (\cref{sec:protocol-and-metrics})
+      & \py{eval\_metrics\_oracle} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[Accelerator parity against CPU]{The same code on both accelerators, each
+  measured against its own machine's CPU reference: ViT-B/32, batch 2, $M = 2048$, with
+  the pair set held fixed so only arithmetic differs. Timing is one
+  forward--backward--step, mean of ten.}
+  \label{tab:device-parity}
+  \begin{tabular}{l l l}
+    \toprule
+                                   & MPS (Apple silicon)   & CUDA (RTX 2080 Ti, \py{gpu30}) \\
+    \midrule
+    \py{torch}                     & 2.12.1                & 2.12.1+cu130 \\
+    Max abs.\ deviation from CPU   & $6.4 \times 10^{-7}$  & $5.8 \times 10^{-7}$ \\
+    Relative deviation             & $2.9 \times 10^{-6}$  & $2.6 \times 10^{-6}$ \\
+    Loss vs CPU                    & identical (16 s.f.)   & rel.\ $1.1 \times 10^{-7}$ \\
+    \py{randperm} matches CPU      & no                    & no \\
+    \py{float64}                   & unsupported           & supported \\
+    Seconds per step               & $0.110$               & $0.038$ \\
+    \midrule
+    Role                           & development, testing   & all reported pretraining \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \apxsection{Why the HLW AUC cannot carry the orientation claim}\label{apx:auc-weighting}
 \Cref{sec:hlw-task} states that HLW's published AUC is structurally dominated by $\rho$ and
 so cannot carry an orientation claim. This is the derivation. The horizon is the line $-x\sin\theta + y\cos\theta = \rho$, so on a square
@@ -39,8 +114,5 @@ The published AUC is, in effect, a $\rho$-prediction score. Nothing in the deriv
 on which arm is being scored or on any measured result, which is why the reporting choice
 could be, and was, fixed before the four arms ran.
 
-\apxsection{Supplementary tables}\label{apx:supplementary}
-\stub{Per-arm tables too detailed for the body, including the intrinsic gates at
-each checkpoint and the per-split downstream results.}
 
 \end{document}
