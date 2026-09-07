@@ -16,7 +16,7 @@ Based on the held-out HLW split, three results were obtained:
 \item RoPART$\pm30^\circ$ beats the baseline but the effect if very small and the confidence intervals graze zero.
 \end{enumerate}
 
-We also established in \ref{ch:pretraining} that wider rotation bound was worse than the narrower one on every structural gate. This could have suggested similar pattern to emerge downstream but it appears not to be the case - on classification, $\pm90^\circ$ scores $69.74$ against $\pm30^\circ$'s $70.00$ - there is virtually no difference. So the range cost is confined to the pretext task and is a poor predictor of transfer.
+We also established in \ref{ch:pretraining} that wider rotation bound was worse than the narrower one on every structural gate. This could have suggested similar pattern to emerge downstream but it appears not to be the case - on classification, $\pm90^\circ$ scores $69.74$ against $\pm30^\circ$'s $70.00$ - there is virtually no difference. So the range cost is a poor predictor of transfer.
 
 
 \section{Protocol: end-to-end finetuning}\label{sec:finetune-protocol}
@@ -135,36 +135,161 @@ friendlier one.
 Note that there are three sources of the noise. The first comes from image sampling as some examples are simply more difficult. To alleviate that, pairing was used as it was cost-free. The second comes from finetune stochasticity. Every arm reported in this chapter is a single finetune seed, so this source is not controlled in the results. A five-seed replication of \texttt{base}, \texttt{ch2} and \texttt{w30} was launched under the protocol above; it had not completed at the time of writing. The third source of noise is pretraining stochasticity. A multiple-seed replication would take 30 hours per arm and was deemed out of budget. The scoring pipeline was first tested on \texttt{val} to rule out wiring issues and to not use \texttt{test}.
 
 \section{Classification on ImageNet-100}\label{sec:in100}
-\stub{The no-degradation check on a basic task. Rotated pixels cost accuracy;
-supervising \dphi{} pays most of it back, returning to parity with the baseline.}
+In \cref{ch:pretraining} the models passed the no-degradation-on-translation check. But the evaluation was on the same task that it was trained on. To actually verify if the pretext task is a solid pretraining technique an independent evaluation on a downstream task must be done. We chose ImageNet-100~\cite{imagenet} which features 100 classes, $~126k$ training set and $5k$ validation set. Note that upstream used the 1K version and 8 GPUs compared to our 100 and single GPU runs. Similarly as before, we use the one-factor-per-step approach to interpret the results.
+
+The finetuning results are presented in \cref{tab:in100-results}:
+
+\begin{table}[htbp]
+  \centering
+  \caption[IN-100 classification, four arms]{ImageNet-100 top-1 validation accuracy
+  (\%) after 100 epochs of end-to-end finetuning, one seed per arm. The arms are the
+  four encoders of \cref{tab:matched-arms} under the recipe of
+  \cref{tab:finetune-recipe}. \emph{Last-10 mean} is the
+  mean over the final ten epochs and is the statistic quoted throughout; \emph{best} is
+  a maximum over 100 evaluations and carries selection noise. No
+  individual gap is significant on one seed (\cref{sec:statistical-protocol}).}
+  \label{tab:in100-results}
+  \footnotesize
+  \begin{tabular}{@{}l r r r r r@{}}
+    \toprule
+    & & epoch of & last-10 & last-10 & $\Delta$ vs \\
+    Arm & best & best & mean & sd & baseline \\
+    \midrule
+    1. baseline
+      & $70.58$ & $82$ & $\mathbf{70.26}$ & $0.16$ & --- \\
+    2. rotated-pixels-unsup.\ $\pm 30^\circ$
+      & $69.00$ & $72$ & $68.84$ & $0.12$ & $\mathbf{-1.41}$ \\
+    3. RoPART $\pm 30^\circ$
+      & $70.12$ & $96$ & $70.00$ & $0.10$ & $-0.26$ \\
+    4. RoPART $\pm 90^\circ$
+      & $70.10$ & $87$ & $69.74$ & $0.05$ & $-0.52$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Looking at the results, adding rotation (not supervising yet) costs performance on classification. Furthermore, supervising it does not recover the full deficit. Note that while finetuning, the order of the models in term of classification performance was reversed but by epoch 50 the RoPART advantage was gone. Note that while structural gates of \cref{ch:pretraining} suggested downgraded performance as the rotation bounds widened, the $70.00$ vs $69.74$ difference is negligible. Large pretext gap therefore says nothing about classification. Note that the results are based on a single run with no seed replication and that the effects are well within paired standard errors so no difference is significant.
 
 \section{The orientation-sensitive task}\label{sec:hlw-task}
-\stub{Horizon line estimation on HLW. The two prediction channels, and why one is
-in-plane orientation while the other is translation-like --- a specificity control
-built into the task rather than bolted on.}
+Horizon Lines in the Wild~\cite{hlw} was selected as a downstream tasks as it ticks two boxes. First is that it deals with in-plane orientation which is a rotation task. Second, the other part of the target, perpendicular distance from the origin, is translation-like and acts as a built-in specificity control. Formally, the task is to regress $(\theta,\rho)$.
+
+A perfect result would be if RoPART beat the baseline on $\theta$ but not $\rho$. If both were to improve equally, the model is simply better - if only $\rho$ improves then that would be evidence against the mechanism. Not that the HLW's published metric is only kept for comparability with the existing protocol: we headline $\theta$ MAE instead, for the reasons set out in \cref{apx:auc-weighting}. The dataset contains $100,553$ images: $96,617$ train, $525$ val, and $2,018$ held-out test scored once. Floors from a train-mean constant predictor: $\theta=1.855^\circ$ val and $\theta=1.643^\circ$ test, $\rho=0.3970$, $AUC=25.45\%$. Note that the data pipeline feature a square-crop ($224\times 224$) step which the HLW authors noted to decrease accuracy. The code wiring was checked before running the four arms. As per protocol, test is only scored once and never tracked every epoch. 
 
 \section{Held-out results}\label{sec:hlw-results}
-\stub{The two significant deficits, and the RoPART advantage with its specificity
-control firing. Reported at the strength the evidence supports: the deficits are
-findings, the advantage is a positive signal awaiting a second seed.}
+This section will present the results: two findings regarding deficits and one signal of the RoPART advantage. As stated in \cref{sec:statistical-protocol} pairing was crucial as the effects observed are small and require tight standard errors. See the full results in \cref{tab:hlw-heldout}:
 
-\section{Why the published metric cannot see the effect}\label{sec:auc-blindness}
-\stub{The published AUC is dominated by the translation-like channel, so it is blind
-to the orientation effect and its arm ordering is unstable between splits. The case
-for headlining angular error instead.}
+\begin{table}[htbp]
+  \centering
+  \caption[HLW held-out results]{HLW horizon estimation on the $2{,}018$-image held-out
+  split, scored once from the epoch-99 checkpoints, one seed per arm. \emph{Upper:}
+  absolute errors, with each channel also given as a percentage of its constant-predictor
+  floor ($\theta_0 = 1.643^\circ$, $\rho_0 = 0.3970$, $\mathrm{AUC}_0 = 25.45\%$) 
+  \emph{Lower:} each rotation arm paired against the baseline
+  on the same images, following \cref{sec:statistical-protocol} 
+  $\dagger$ marks a $p$ surviving the Bonferroni threshold $\alpha' = 0.0167$
+  (\cref{eq:bonferroni}).}
+  \label{tab:hlw-heldout}
+  \footnotesize
+  \begin{tabular}{@{}l r r r r r@{}}
+    \toprule
+    \multicolumn{6}{@{}l}{\emph{Absolute error on the held-out split}} \\
+    \cmidrule(r){1-6}
+    Arm & $\theta$ MAE & \% floor & $\rho$ MAE & \% floor & AUC \\
+    \midrule
+    1. baseline                     & $0.9692$ & $59.0$ & $0.1560$ & $39.3$ & $0.6079$ \\
+    2. rotated-pixels-unsup.\ $\pm 30^\circ$ & $1.0297$ & $62.7$ & $0.1606$ & $40.5$ & $0.6024$ \\
+    3. RoPART $\pm 30^\circ$        & $\mathbf{0.9386}$ & $\mathbf{57.1}$ & $\mathbf{0.1554}$ & $\mathbf{39.1}$ & $\mathbf{0.6110}$ \\
+    4. RoPART $\pm 90^\circ$        & $1.0206$ & $62.1$ & $0.1602$ & $40.4$ & $0.5986$ \\
+    \addlinespace[0.6em]
+    \multicolumn{6}{@{}l}{\emph{Paired against the baseline, same images}} \\
+    \cmidrule(r){1-6}
+    Arm & $\Delta\theta$ & 95\% CI & $p_\theta$ & $\Delta\rho$ & $p_\rho$ \\
+    \midrule
+    3. RoPART $\pm 30^\circ$        & $\mathbf{-0.0306}$ & $[-0.0626,\, +0.0006]$ & $0.027$              & $-0.0006$ & $0.93$ \\
+    2. rotated-pixels-unsup.        & $+0.0606$          & $[+0.0258,\, +0.0951]$ & $0.0021^{\dagger}$   & $+0.0046$ & $0.0047$ \\
+    4. RoPART $\pm 90^\circ$        & $+0.0514$          & $[+0.0181,\, +0.0840]$ & $0.00022^{\dagger}$  & $+0.0042$ & $0.10$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Leveraging the one-step-per-factor design again, we first notice a deficit when pixels are rotated but not supervised when compared to a baseline - this result agrees in terms of direction with ImageNet results as described in \cref{sec:in100}. Furthermore, supervising wide rotation range does not close the gap, keeping the deficit. RoPART$\pm30^\circ$ performs ever-so-slightly better than the baseline measured by $\Delta\theta$ but the confidence interval grazes $0$. At the very least, the deficit from rotation is closed by supervision. 
+
+Crucially, $p_\theta=0.027$ and $p_\rho=0.93$ - rotation improves and translation stays where it was. This suggests that the small positive effects are due to construction of RoPART rather than the encoder being simply better. 
+
+We can now carry out the checks we fixed in \cref{sec:statistical-protocol}. See \cref{tab:hlw-claims} for summary.
+
+\begin{table}[htbp]
+  \centering
+  \caption[What each held-out comparison supports]{Statistical checks. $\Delta\theta$ is repeated from \cref{tab:hlw-heldout} for orientation only; the
+  \texttt{val} column is the $525$-image per-epoch split. ``$\rho$ moves'' reports whether the translation-like channel also
+  shifted at $\alpha = 0.05$; the specificity criterion of \cref{eq:specificity} is a test
+  of an \emph{improvement} and applies to row 3 alone.}
+  \label{tab:hlw-claims}
+  \footnotesize
+  \begin{tabular}{@{}l r r c r c c l@{}}
+    \toprule
+    & \multicolumn{2}{c}{$\Delta\theta$ vs base} & CI & & Bonf. & $\rho$ & \\
+    \cmidrule(lr){2-3}
+    Arm & \texttt{test} & \texttt{val} & excl.\ 0 & Wilcoxon & $\alpha'$ & moves & Claimed as \\
+    \midrule
+    2. rot.-pixels-unsup.
+      & $+0.0606$ & $+0.1068$ & yes & $0.0021$   & pass & yes  & finding \\
+    4. RoPART $\pm 90^\circ$
+      & $+0.0514$ & $+0.0383$ & yes & $0.00022$  & pass & no   & finding \\
+    3. RoPART $\pm 30^\circ$
+      & $-0.0306$ & $-0.0036$ & no  & $0.027$    & fail & no   & positive signal \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Note that any positive results are weakened in magnitude by the overfitting present in the finetuning process. The models paid the price of being able to learn \dphi{} in the pretext task by increasing the patch size and the overall model size. Because of that, any positive results can only be interpreted as signals. Deficits however, remain as nuisances that survive overfitting are real properties of the pretrained features.
+
+Note that had we used AUC as the headline metric, we would come to different conclusions. RoPART$\pm30^\circ$ is $p=0.99$ when compared to baseline using AUC and $\theta$ on the same comparison is $p=0.027$. Also, AUC ordering is unstable between val and test splits which is note the case for MAE.
 
 \section{Data integrity}\label{sec:data-integrity}
-\stub{What was verified before the numbers were trusted, and the parsing bug that
-was caught by a constants check rather than by the results looking wrong.}
+This section briefly describes the data pre-processing pipeline and the integrity checks used. These were crucial as to avoid the garbage-in-garbage-out problem. See \cref{tab:integrity} for details.
+
+\begin{table}[htbp]
+  \centering
+  \caption[Integrity checks on the horizon pipeline]{Integrity checks on the horizon pipeline. Every check run on the horizon
+  pipeline, what it would have caught, and what it returned.}
+  \label{tab:integrity}
+  \footnotesize
+  \begin{tabular}{@{}p{0.24\textwidth} p{0.32\textwidth} p{0.34\textwidth}@{}}
+    \toprule
+    Check & Would catch & Result \\
+    \midrule
+    Metadata regeneration
+      & a stale or partial rebuild
+      & $100{,}553$ rows, distinct from the previous copy \\
+    Round-trip, 500 images
+      & labels corrupted by the crop and resize
+      & $|\Delta\theta|_{\max} = 0.00000^\circ$, $|\Delta\rho|_{\max} = 1.87\mathrm{e}{-3}$ \\
+    Target statistics
+      & a parse that is self-consistent but wrong
+      & reproduce the raw files and lie inside the bounds a horizon dataset must satisfy \\
+    Launched configuration
+      & the wrong data root or the wrong constants
+      & first arm's \py{run.log} carries both, pinned \\
+    Split disjointness
+      & contamination of the held-out split
+      & $\mathrm{train} \cap \mathrm{test} = 0$, $\mathrm{train} \cap \mathrm{val} = 0$ \\
+    \py{val} scoring vs \py{run.log}
+      & a silently mangled weight load at scoring time
+      & all four arms reproduce their epoch-99 $\theta$ / $\rho$ exactly \\
+    Checkpoint policy
+      & selection of a lucky epoch on \py{val}
+      & overwritten each epoch, so epoch 99 is scored and nothing is selected \\
+    Axis convention
+      & a sign flip in $\theta$
+      & \py{Y\_AXIS\_DOWN = False}, against the NG-DSAC loader and $8/8$ renders \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \section{Synthesis}\label{sec:synthesis}
-\stub{The two downstream measurements against the pretext ordering. Pretext gate
-quality turns out not to be a proxy for downstream utility, which qualifies the
-range-cost result of \cref{sec:matched-budget}.}
+In summary, the ordering is identical on every measurement: rotated-pixels-not-supervised comes last, RoPART$\pm90^\circ$ comes in third, with RoPART$\pm30^\circ$ and baseline sharing the top spot. This is observed across ImageNet-100 top-1, HLW \texttt{val} $\theta$, and HLW \texttt{test} $\theta$. Both on ImageNet and HLW, rotation creates a deficit and supervision either recovers it or even slightly overshoots. Furthermore, RoPART$\pm30^\circ$'s improvements on HLW are structurally sound as only rotation part of the task sees improved performance, with translation performance steady. We also found that structural gates from \cref{ch:pretraining} are a poor predictor of downstream performance and so the $30^\circ\rightarrow90^\circ$ cost is task-dependent. Again, the two deficits (of rotation and wide bounds) are significant, whereas the RoPART$\pm30^\circ$'s improvement is a suggestive advantage.
 
-\section{Threats to validity revisited}\label{sec:threats-revisited}
-\stub{The interpolation confound and orientation recoverability, revisited against
-everything now measured --- what has been closed, and what remains open.}
+Revisiting the original validity threats, we found that the interpolation confound is structurally irrelevant downstream as the images the model sees during finetuning are clean and unrotated. Recoverability issues were avoided by designing a model with $P=32$ and the HLW orientation was well-posed as every outdoor scene has a horizon and gravity provides a canonical frame. This chapter also introduced new validity threats such as single-seed finetunes, lack of control over pretraining stochasticity (due to prohibitively long training runs), overfitting regime, $w_\varphi=0.1$ fixed across both ranges.
 
 \ifSubfilesClassLoaded{\pagebreak\printbibliography}{}
 \end{document}

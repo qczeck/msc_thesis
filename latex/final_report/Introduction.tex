@@ -12,7 +12,28 @@ One powerful supervisory signal to design the pretext task around is geometry. D
 That is until \textbf{PA}irwise \textbf{R}elative \textbf{T}ranslations~\cite{part} method was proposed. PART samples $N$ pairs of patches continuously, not confined to a fixed grid. It then tasks the model with predicting the relative translatoin \dxy{} between the two patches of pairs - this is a continuous target rather than a discrete one. What is also important is what that method withholds: the encoder receives no positional embeddings - nothing in the input tells the model where the patch is located. Therefore, in order to place e.g. the left ear above and to the left of the nose the model has to build a rich internal representation leveraging only the geometry as the supervisory signal.
 
 \section{Problem statement: from translation to \texorpdfstring{\SEtwo}{SE(2)}}\label{sec:problem-statement}
-PART supervises relative translation out of the box and the authors show that this method is extendable to relative scale and aspect ratio $(\Delta w, \Delta h)$ at a cost of slower convergence of \dxy{}~\cite{part}. The authors leave modelling rotation as future work. By adding relative orientation as a generator the pretext task expands from a translation subgroup to a group of planar rigid motions, \SEtwo{}. Adding rotation requires to first modify the pipeline to rotate the patches before embedding them and second to deal with a blur signature that the model could exploit to learn the angles without actually learning proper representations. Importantly, rotating a patch and supervising such rotation are two separate decisions which have to be separated: a model given rotated patches only supervising \dxy{} may still be affected by them. This distinction is kept throughout the whole of this report.
+PART supervises relative translation out of the box and the authors show that this method is extendable to relative scale and aspect ratio $(\Delta w, \Delta h)$ at a cost of slower convergence of \dxy{}~\cite{part}. The authors leave modelling rotation as future work. By adding relative orientation as a generator the pretext task expands from a translation subgroup to a group of planar rigid motions, \SEtwo{}. Adding rotation requires to first modify the pipeline to rotate the patches before embedding them and second to deal with a blur signature that the model could exploit to learn the angles without actually learning proper representations. Importantly, rotating a patch and supervising such rotation are two separate decisions which have to be separated: a model given rotated patches only supervising \dxy{} may still be affected by them. This distinction is kept throughout the whole of this report. \Cref{fig:ropart-teaser} shows a single example pair and the question asked to the model.
+
+\begin{figure}[tb]
+  \centering
+  \includegraphics[width=\textwidth]{ropart_pair.pdf}
+  \caption[The RoPART pretext task]{%
+    \textbf{The RoPART pretext task.} Two patches are sampled off-grid, at
+    continuous positions \emph{and} continuous orientations. Tick on each
+    footprint marks that patch's local $x$ axis. The encoder sees only the two
+    crops on the right - no positional embeddings, no absolute coordinates - and
+    must regress the relative rigid motion between them: PART supervises \dxy{}
+    alone, RoPART adds \dphi{}. Here the reference $i$ (head) was
+    drawn at $\varphi_i = -25^\circ$ and the target $j$ (paw) at
+    $\varphi_j = +20^\circ$ (positive is clockwise, as the image $y$ axis points
+    down), giving $\Delta\varphi = +45^\circ$, encoded as
+    $(\cos\Delta\varphi, \sin\Delta\varphi) = (+0.71, +0.71)$, and
+    $(\Delta x, \Delta y) = (+1.00, +3.25)$ patch widths, i.e. $(+32, +104)$ px in
+    the $224 \times 224$ frame. Note that the crops are read from a $6\times$ copy of the photograph so they
+    survive print, which leaves both targets unchanged.
+  }%
+  \label{fig:ropart-teaser}
+\end{figure}
 
 The research question is then: 
 \begin{quote}Does supervising \dphi{} yield representations with better orientation-sensitive downstream performance without degrading classification at the same time?

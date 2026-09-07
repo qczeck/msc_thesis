@@ -263,7 +263,29 @@ There is one more trap: the blur is oriented. Bilinear resampling is convolution
   \;\;\not\Longrightarrow\;\;
   \mathrm{PSF}_{\text{ctrl}}(\varphi) = \text{const} .
 \end{equation}
-In words: flattening the magnitude cue is necessary but not sufficient. This is what will rank the four controls below. The controls are:
+In words: flattening the magnitude cue is necessary but not sufficient.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.86\textwidth]{supersample_patches.pdf}
+  \caption[The supersample control on one patch]{%
+    \textbf{The cue, and the control, on one patch.} The same $P = 32$ region read three
+    ways. \textbf{Left}: axis-aligned - the sample points land on pixel centres, so the
+    bilinear read is a copy and costs nothing. \textbf{Middle}: the same region at
+    $\varphi = 40^\circ$ through one raw warp, which gives up $10\%$ of its high-frequency
+    energy; the collar edge and the fur are visibly softer. \textbf{Right}: the identical
+    warp after a bicubic $\times 4$ upsample of the source (\cref{eq:supersample}), which
+    restores the detail. Middle and right differ \emph{only} by the control, so the gap
+    between them is the cue a model could read instead of the orientation - and because it
+    varies with $\varphi$ it is a confound rather than noise. $E$ is \cref{eq:sharpness}
+    normalised by the supersampled read of the \emph{same} region at the \emph{same} angle,
+    which cancels the content difference a rotated window introduces and makes the
+    right-hand panel $1$ by construction.
+  }%
+  \label{fig:ss-patches}
+\end{figure}
+
+ This is what will rank the four controls below. The controls are:
 \begin{enumerate}
 \item Matched blur: solve for a per-angle isotropic $\sigma(\varphi)$ that flattens \cref{eq:sharpness} to its worst case:
 \begin{equation}\label{eq:matched-blur}
@@ -284,7 +306,7 @@ It has one limitation: randomisation adds angle-independent variance but leaves 
  \begin{equation}\label{eq:supersample}
   \delta^{(k)} \;=\; O(1/k), \qquad k = 4 ,
 \end{equation}
-This makes resampling near-lossles and its PSF near angle-independent. Both cues are removed - \emph{this is the control that was selected and all the results rest on}. Note that for $k=4$ the residual sharpness ratio is 0.96 versus 0.81 for the raw path - we removed $\approx96\%$ of the signature, not $100\%$.
+This makes resampling near-lossles and its PSF near angle-independent. Both cues are removed - \emph{this is the control that was selected and all the results rest on}. \Cref{fig:ss-patches} shows the effect on a single patch. Note that for $k=4$ the residual sharpness ratio is 0.96 versus 0.81 for the raw path - we removed $\approx96\%$ of the signature, not $100\%$.
 \item Dominant isotropic low-pass: swamp the anisotropy with one heavy isotropic blur for each path:
 \begin{equation}\label{eq:dominant-lp}
   \mathrm{PSF}_{\text{eff}}(\varphi) \;=\; \mathrm{PSF}_{\text{interp}}(\varphi) * G_{\sigma_{\mathrm{lp}}},

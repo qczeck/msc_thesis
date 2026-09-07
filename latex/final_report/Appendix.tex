@@ -6,13 +6,38 @@
 % code listings, which live in the repository.
 
 \begin{document}
-\apxsection{Hyperparameters and run configurations}\label{apx:hyperparameters}
-\stub{The full configuration of every run referenced in the report, so that a
-reader can reproduce it: patch size, schedule, batch size, loss weights, seeds.}
-
-\apxsection{The pre-registration}\label{apx:pre-registration}
-\stub{The analysis plan for the held-out scoring, reproduced verbatim as it was
-fixed before the runs started.}
+\apxsection{Why the HLW AUC cannot carry the orientation claim}\label{apx:auc-weighting}
+\Cref{sec:hlw-task} states that HLW's published AUC is structurally dominated by $\rho$ and
+so cannot carry an orientation claim. This is the derivation. The horizon is the line $-x\sin\theta + y\cos\theta = \rho$, so on a square
+crop ($W/H = 1$) its intercepts at the left and right image edges, in image heights, are
+\begin{equation}\label{eq:hlw-lr}
+  l \;=\; \frac{\rho - \tfrac{1}{2}\sin\theta}{\cos\theta}
+    \;=\; \rho\sec\theta - \tfrac{1}{2}\tan\theta,
+  \qquad
+  r \;=\; \rho\sec\theta + \tfrac{1}{2}\tan\theta ,
+\end{equation}
+and the protocol's per-image error is the larger of the two edge discrepancies between the
+predicted and true horizon, $e_{\texttt{horizon}} = \max\bigl(|\hat l - l|,\; |\hat r - r|\bigr)$,
+from which the AUC is computed. Differentiating \cref{eq:hlw-lr} about $\theta = 0$ gives the
+weight each channel carries into that error:
+\begin{equation}\label{eq:hlw-weights}
+  \Bigl|\frac{\partial l}{\partial \rho}\Bigr|_{\theta = 0} = 1,
+  \qquad
+  \Bigl|\frac{\partial l}{\partial \theta}\Bigr|_{\theta = 0} = \tfrac{1}{2} .
+\end{equation}
+An orientation error therefore enters the headline metric at \emph{half} weight and a
+translation error at \emph{full} weight. Evaluated at the constant-predictor floor of the
+held-out split ($\theta_0 = 1.643^\circ$, $\rho_0 = 0.3970$), the two contributions are
+\begin{equation}\label{eq:hlw-dominance}
+  \tfrac{1}{2}\tan\theta_0 \;=\; 0.0143
+  \quad\text{against}\quad
+  \rho_0 \;=\; 0.3970 ,
+  \qquad
+  \text{a ratio of } \approx 28\times .
+\end{equation}
+The published AUC is, in effect, a $\rho$-prediction score. Nothing in the derivation depends
+on which arm is being scored or on any measured result, which is why the reporting choice
+could be, and was, fixed before the four arms ran.
 
 \apxsection{Supplementary tables}\label{apx:supplementary}
 \stub{Per-arm tables too detailed for the body, including the intrinsic gates at
