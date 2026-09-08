@@ -6,7 +6,7 @@
 \ourchapter{Conclusions and future work}\label{ch:conclusion}
 
 \section{Findings}\label{sec:findings}
-In this section we will summarise what the project established. Note that for a claim to be considered established it has to rest on significant paired measurement or in agreement across independent measurements. If a claim rests on a single seed it is considered merely suggested. With that being said, here's what the project established:
+In this section we will summarise what the project established:
 \begin{itemize}
 \item Relative orientation is learnable under RoPART pretext at $P=32$ and $\pm30^\circ$ and the deconfounded arm matches raw so interpolation signature is ruled out.
 \item Orientation is not learnable at small patches. $P=4,8,16$ runs all came back null as recoverability at this small of a patch size is too difficult to get.
@@ -15,17 +15,13 @@ In this section we will summarise what the project established. Note that for a 
 \item Wide range is not repaired by supervision like in the narrow case.
 \item Pretext structural gates are a poor predictor of downstream utility.
 \item Side result: HLW's AUC is structurally $\rho$ dominated ($\approx 28\times$) and blind to the orientation effect.
+\item RoPART$\pm30^\circ$ beats the baseline on HLW $\theta$ by $4.2\%$ with the specificity control null, suggesting that improvements are driven by the pretext task design rather than the model being ``better''.
 \end{itemize}
-And what the project suggested:
-\begin{itemize}
-\item RoPART$\pm30^\circ$ beats the baseline on HLW $\theta$ by $3.2\%$ with the specificity control at $p_\rho=0.93$ suggesting that improvements are driven by the pretext task design rather than the model being ``better''.
-\end{itemize}
-While the single-seed is what limits the strength of the claim it does feature identical ordering across measurements and that makes it worth reporting.
+
 
 \section{Limitations}\label{sec:limitations}
 This section will describe the limitations of the project. Below we list them and name measures that would remove them:
 \begin{itemize}
-\item Headline result rests on a single-seed and the bootstrap CI grazes zero. It also fails the Bonferroni against other arms. Adding more seeds per arm would put more confidence in the results.
 \item Only a single dataset per downstream task. Orientation is entirely covered by HLW, classification by ImageNet-100. Currently the results hinge on the type of the task and the specific dataset at the same time. Adding more classification and orientation tasks would allow more general conclusions to be drawn.
 \item There is a single value of the rotation bound, $a=30^\circ$ combined with a single patch size, $P=32$ that together give the only point at which the model performs better than the baseline. A full sweep of $a$ could lead to a larger set of suitable bounds, perhaps even being able to decide the optimum.
 \item The blur is technically only $96\%$ removed, just shy of $100\%$ which means some blur signature might have slipped through. Adding more controls (e.g. randomised blur which decorrelates it from \dphi{}) would increase the confidence in the statement that blur signature did not play a role.

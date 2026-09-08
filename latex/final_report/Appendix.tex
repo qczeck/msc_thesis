@@ -115,4 +115,103 @@ on which arm is being scored or on any measured result, which is why the reporti
 could be, and was, fixed before the four arms ran.
 
 
+\apxsection{Software environment}\label{apx:software-stack}
+RoPART has eight direct dependencies, declared in \py{RoPART/requirements.txt} and listed
+below. Versions are those the reported runs were produced with; the requirements file states
+lower bounds rather than exact pins.
+
+\begin{table}[htbp]
+  \centering
+  \caption[The software environment]{The direct dependencies of the RoPART package,
+  under Python 3.12. Transitive dependencies omitted.}
+  \label{tab:software-stack}
+  \footnotesize
+  \begin{tabular}{l l l}
+    \toprule
+    Package & Version & Role \\
+    \midrule
+    \py{torch}        & 2.12.1  & Model definition, training, and data pipelines. \\
+    \py{torchvision}  & 0.27.1  & Dataset readers and image transforms. \\
+    \py{numpy}        & 2.5.0   & Array maths off the GPU, including the statistics. \\
+    \py{pillow}       & 12.2.0  & Image decoding. \\
+    \py{matplotlib}   & 3.11.0  & Figures. \\
+    \py{wandb}        & 0.28.0  & Experiment tracking, run offline and synced afterwards. \\
+    \py{jupyter}      & 1.1.1   & Exploratory notebooks. \\
+    \py{ipykernel}    & 7.3.0   & The kernel those notebooks run against. \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+\apxsection{Single-seed held-out results}\label{apx:single-seed}
+\Cref{sec:hlw-results} reports the horizon arms over five finetune seeds, which excludes
+RoPART $\pm 90^\circ$ - that arm was run on one seed by design, since it was never the
+claim. The two tables below are the original single-seed measurement, scored once from the
+epoch-99 checkpoints of seed $0$ under the protocol of \cref{sec:statistical-protocol}, and
+are retained here for three reasons: they carry the $\pm 90^\circ$ arm, they are the numbers
+the per-image Wilcoxon and paired-bootstrap machinery was defined on, and they show that
+seed $0$ was the \emph{weakest} of the five for RoPART $\pm 30^\circ$
+($-0.0306$ against a five-seed mean of $-0.0409$), so the single-seed reading understated
+the effect rather than overstating it.
+
+\begin{table}[htbp]
+  \centering
+  \caption[HLW held-out results, single seed]{HLW horizon estimation on the $2{,}018$-image
+  held-out split, scored once from the epoch-99 checkpoints, \textbf{one seed per arm}.
+  \emph{Upper:} absolute errors, with each channel also given as a percentage of its
+  constant-predictor floor ($\theta_0 = 1.643^\circ$, $\rho_0 = 0.3970$,
+  $\mathrm{AUC}_0 = 25.45\%$). \emph{Lower:} each rotation arm paired against the baseline
+  on the same images, following \cref{sec:statistical-protocol}. $\dagger$ marks a $p$
+  surviving the Bonferroni threshold $\alpha' = 0.0167$ (\cref{eq:bonferroni}).}
+  \label{tab:hlw-heldout-single}
+  \footnotesize
+  \begin{tabular}{@{}l r r r r r@{}}
+    \toprule
+    \multicolumn{6}{@{}l}{\emph{Absolute error on the held-out split}} \\
+    \cmidrule(r){1-6}
+    Arm & $\theta$ MAE & \% floor & $\rho$ MAE & \% floor & AUC \\
+    \midrule
+    1. baseline                     & $0.9692$ & $59.0$ & $0.1560$ & $39.3$ & $0.6079$ \\
+    2. rotated-pixels-unsup.\ $\pm 30^\circ$ & $1.0297$ & $62.7$ & $0.1606$ & $40.5$ & $0.6024$ \\
+    3. RoPART $\pm 30^\circ$        & $\mathbf{0.9386}$ & $\mathbf{57.1}$ & $\mathbf{0.1554}$ & $\mathbf{39.1}$ & $\mathbf{0.6110}$ \\
+    4. RoPART $\pm 90^\circ$        & $1.0206$ & $62.1$ & $0.1602$ & $40.4$ & $0.5986$ \\
+    \addlinespace[0.6em]
+    \multicolumn{6}{@{}l}{\emph{Paired against the baseline, same images}} \\
+    \cmidrule(r){1-6}
+    Arm & $\Delta\theta$ & 95\% CI & $p_\theta$ & $\Delta\rho$ & $p_\rho$ \\
+    \midrule
+    3. RoPART $\pm 30^\circ$        & $\mathbf{-0.0306}$ & $[-0.0626,\, +0.0006]$ & $0.027$              & $-0.0006$ & $0.93$ \\
+    2. rotated-pixels-unsup.        & $+0.0606$          & $[+0.0258,\, +0.0951]$ & $0.0021^{\dagger}$   & $+0.0046$ & $0.0047$ \\
+    4. RoPART $\pm 90^\circ$        & $+0.0514$          & $[+0.0181,\, +0.0840]$ & $0.00022^{\dagger}$  & $+0.0042$ & $0.10$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \caption[What each single-seed comparison supported]{The single-seed statistical checks, as
+  they stood before the replication. $\Delta\theta$ is repeated from
+  \cref{tab:hlw-heldout-single}; the \texttt{val} column is the $525$-image per-epoch split.
+  ``$\rho$ moves'' reports whether the translation-like channel also shifted at
+  $\alpha = 0.05$. On one seed the RoPART $\pm 30^\circ$ interval grazed zero and failed
+  Bonferroni, which is why it was carried as a signal rather than a finding; the five-seed
+  interval of \cref{tab:hlw-claims} promotes it.}
+  \label{tab:hlw-claims-single}
+  \footnotesize
+  \begin{tabular}{@{}l r r c r c c l@{}}
+    \toprule
+    & \multicolumn{2}{c}{$\Delta\theta$ vs base} & CI & & Bonf. & $\rho$ & \\
+    \cmidrule(lr){2-3}
+    Arm & \texttt{test} & \texttt{val} & excl.\ 0 & Wilcoxon & $\alpha'$ & moves & Claimed as \\
+    \midrule
+    2. rot.-pixels-unsup.
+      & $+0.0606$ & $+0.1068$ & yes & $0.0021$   & pass & yes  & finding \\
+    4. RoPART $\pm 90^\circ$
+      & $+0.0514$ & $+0.0383$ & yes & $0.00022$  & pass & no   & finding \\
+    3. RoPART $\pm 30^\circ$
+      & $-0.0306$ & $-0.0036$ & no  & $0.027$    & fail & no   & positive signal \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \end{document}
