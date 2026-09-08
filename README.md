@@ -2,6 +2,13 @@
 
 **Learning relative orientation in off-grid self-supervised vision.**
 
+![Two off-grid patches sampled from one image, and the relative translation and orientation the pretext task asks the model to predict between them](latex/final_report/figures/ropart_pair.png)
+
+*The RoPART pretext task: sample two patches at random continuous positions and
+orientations, then predict the relative transform `(Δx, Δy, Δφ)` that takes the
+reference patch to the target. No absolute positions, no position embeddings — the
+geometry is the supervision.*
+
 RoPART (**Ro**tation + PART) extends [PART](https://github.com/Melika-Ayoughi/PART)'s
 pairwise self-supervised pretext task from relative *translation* `(Δx, Δy)` between
 off-grid image patches to planar *rigid motion* SE(2), by adding a relative
