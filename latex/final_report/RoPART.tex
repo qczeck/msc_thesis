@@ -46,7 +46,7 @@ it is not what RoPART regresses. The actual implemented target for the ordered p
   \qquad
   \Delta\varphi \;\triangleq\; \varphi_j - \varphi_i .
 \end{equation}
-Note that this target is not exactly \SEtwo, but rather \SEtwo with the translation read in a global frame, not $g_i^{-1}g_j$ exactly, as the translation channels are differenced in the global image frame. In other words, the two frames coincide up to the $R(-\varphi_i)$ factor. This decision was made for better compatibility and comparison with the PART method. This enabled adding rotation on top of translation similarly to how $\Delta w$ and $\Delta h$ were added. Note that $\dx$ and $\dy$ contain $P$ in the denominator as every patch is of the same size. Another point worth mentioning is that global rotation ($\varphi_i$) is never supervised, only the differences are. 
+Note that this target is not exactly \SEtwo, but rather \SEtwo{} with the translation read in a global frame, not $g_i^{-1}g_j$ exactly, as the translation channels are differenced in the global image frame. In other words, the two frames coincide up to the $R(-\varphi_i)$ factor. This decision was made for better compatibility and comparison with the PART method. This enabled adding rotation on top of translation similarly to how $\Delta w$ and $\Delta h$ were added. Note that $\dx$ and $\dy$ contain $P$ in the denominator as every patch is of the same size. Another point worth mentioning is that global rotation ($\varphi_i$) is never supervised, only the differences are. 
 
 When the targets are constructed, they must first pass the structural invariants checks to confirm that they have been generated correctly. These are:
 \begin{align}
@@ -62,7 +62,7 @@ When the targets are constructed, they must first pass the structural invariants
   \Delta\varphi_{ik} &= \operatorname{wrap}(\Delta\varphi_{ij} + \Delta\varphi_{jk}).
   \label{eq:inv-composition}
 \end{align}
-In words, rotation relative to self should be zero (identity), rotation from i to j should be equal to rotation from j to i (negative symmetry), and rotation from i to k should be equal to the sum of rotations from i to j and from j to k (composition). Note that these equations play double role - once when targets are constructed and once when predictions are evaluated. The second role ensures that the model took no shortcuts, e.g. by reading a blur signature. Out of all the checks, composition is the strongest and symmetry may hold when it does not. 
+In words, rotation relative to self should be zero (identity), rotation from $i$ to $j$ should be equal to negative rotation from $j$ to $i$ (negative symmetry), and rotation from $i$ to $k$ should be equal to the sum of rotations from $i$ to $j$ and from $j$ to $k$ (composition). Note that these equations play double role - once when targets are constructed and once when predictions are evaluated. The second role ensures that the model took no shortcuts, e.g. by reading a blur signature. Out of all the checks, composition is the strongest and symmetry may hold when it does not. 
 
 For a batch of $b$ images, then, the builder emits every ordered pair at once,
 \begin{equation}\label{eq:target-table}
@@ -119,7 +119,7 @@ To introduce the loss, first define the four channels of $\theta_{ij}$ (\cref{eq
   \;=\; w_{xy}\,\frac{1}{2 b M}\!\!\sum_{k \in \mathcal{G}_{xy}}\sum_{n,m}\!\bigl(\hat\theta_{knm} - \theta_{knm}\bigr)^2
   \;+\; w_{\varphi}\,\frac{1}{2 b M}\!\!\sum_{k \in \mathcal{G}_{\varphi}}\sum_{n,m}\!\bigl(\hat\theta_{knm} - \theta_{knm}\bigr)^2 .
 \end{equation}
-where $k$ indexes channels within a group, $n=1,\dots,b$ indexes images in the batch, and $m=1\dots,M$ indexes the sampled ordered pairs of \cref{eq:pair-sampling}. Note that the loss is taken over the $M$ sampled pairs, not the full $N\times N$ table. Note that if we set $w_\varphi=0$ and drop $\mathcal{G}\varphi$ we recover PART's loss.
+where $k$ indexes channels within a group, $n=1,\dots,b$ indexes images in the batch, and $m=1,\dots,M$ indexes the sampled ordered pairs of \cref{eq:pair-sampling}. Note that the loss is taken over the $M$ sampled pairs, not the full $N\times N$ table. Note that if we set $w_\varphi=0$ and drop $\mathcal{G}_\varphi$ we recover PART's loss.
 
 There is an issue with the form above when $w_{xy}=w_\varphi=1$ the translation term is $\mathrm{Var}(\Delta x)\approx 6$ whereas the rotation group is bounded by $1-(\sin a/a)^4$ \cref {eq:rot-floor-bounded}, which at $a=30^\circ$ is $0.169$ - a $\sim$30$\times$ imbalance. In this case, $\Delta\varphi$ collapses to a mean-predictor. 
 
@@ -156,7 +156,7 @@ So the two anchors differ by the same fixed offset for every patch. However, onc
 \begin{equation}\label{eq:corner-entangles}
   c^{\text{corner}}_i(\varphi_i) \;=\; c^{\text{centre}}_i - R(\varphi_i)\,\tfrac{P}{2}\mathbf{1},
 \end{equation}
-So by choosing to anchor at the corners, \dxy would carry a $\varphi$-dependent term - the translation channel would lose its control properties for the rotation channel. The centre is the unique fixed point of $R(\varphi_i)$.%
+So by choosing to anchor at the corners, \dxy{} would carry a $\varphi$-dependent term - the translation channel would lose its control properties for the rotation channel. The centre is the unique fixed point of $R(\varphi_i)$.%
 \footnote{A half-pixel detail that does not affect the targets: the target builder uses the
 geometric centre $(x_s + x_e)/2$, while the rotated pixel read uses the pixel-index centre
 $(x_s + x_e - 1)/2$, so that an integer coordinate lands on a pixel centre. The two differ by
@@ -233,7 +233,7 @@ With rotation, resampling is unavoidable and loses detail as a function of $\var
 \begin{equation}\label{eq:sharpness}
   E(\varphi) \;=\; \bigl\langle\, |\partial_x p_\varphi| + |\partial_y p_\varphi| \,\bigr\rangle .
 \end{equation}
-By sweeping $\varphi$ we obtain the curve in \cref{fig:interp-confound}. It is lossless at multiples of $90^\circ$ and features ~21\% loss at every other angle. 
+By sweeping $\varphi$ we obtain the curve in \cref{fig:interp-confound}. It is lossless at multiples of $90^\circ$ and features $\approx21\%$ loss at every other angle. 
 
 
 \begin{figure}[t]
@@ -257,7 +257,7 @@ By sweeping $\varphi$ we obtain the curve in \cref{fig:interp-confound}. It is l
   \label{fig:interp-confound}
 \end{figure}
 
-There is one more trap: the blur is oriented. Bilinear resampling is convolution with the separable kernel of \cref{eq:bilinear}. It's effective point-spread function is anisotropic with an orientation that tracks $\varphi$. Therefore:
+There is one more trap: the blur is oriented. Bilinear resampling is convolution with the separable kernel of \cref{eq:bilinear}. Its effective point-spread function is anisotropic with an orientation that tracks $\varphi$. Therefore:
 \begin{equation}\label{eq:magnitude-not-sufficient}
   E_{\text{ctrl}}(\varphi) = \text{const}
   \;\;\not\Longrightarrow\;\;
@@ -306,7 +306,7 @@ It has one limitation: randomisation adds angle-independent variance but leaves 
  \begin{equation}\label{eq:supersample}
   \delta^{(k)} \;=\; O(1/k), \qquad k = 4 ,
 \end{equation}
-This makes resampling near-lossles and its PSF near angle-independent. Both cues are removed - \emph{this is the control that was selected and all the results rest on}. \Cref{fig:ss-patches} shows the effect on a single patch. Note that for $k=4$ the residual sharpness ratio is 0.96 versus 0.81 for the raw path - we removed $\approx96\%$ of the signature, not $100\%$.
+This makes resampling near-lossless and its PSF near angle-independent. Both cues are removed - \emph{this is the control that was selected and all the results rest on}. \Cref{fig:ss-patches} shows the effect on a single patch. Note that for $k=4$ the residual sharpness ratio is 0.96 versus 0.81 for the raw path - we removed $\approx96\%$ of the signature, not $100\%$.
 \item Dominant isotropic low-pass: swamp the anisotropy with one heavy isotropic blur for each path:
 \begin{equation}\label{eq:dominant-lp}
   \mathrm{PSF}_{\text{eff}}(\varphi) \;=\; \mathrm{PSF}_{\text{interp}}(\varphi) * G_{\sigma_{\mathrm{lp}}},
@@ -314,7 +314,7 @@ This makes resampling near-lossles and its PSF near angle-independent. Both cues
 \end{equation}
 This will result in the heaviest signal loss of the four.
 \end{enumerate}
-Table \cref{tab:controls} summarises the controls.
+\Cref{tab:controls} summarises the controls.
 \begin{table}[htbp]
   \centering
     \caption[The four interpolation controls]{Which cue each control breaks. The
@@ -339,7 +339,7 @@ Table \cref{tab:controls} summarises the controls.
 \end{table}
 
 \section{The relative head}\label{sec:relative-head}
-The encoder takes the input pseudo-image and turns it into $N$ patch tokens $X'$. The relative head maps and ordered pair $9i,j)$ to $\hat\theta{ij}$ - it is the prediction against the target \cref{eq:target-ropart}. A standard Vision Transformer encoder is used, with one exception:
+The encoder takes the input pseudo-image and turns it into $N$ patch tokens $X'$. The relative head maps an ordered pair $(i,j)$ to $\hat\theta_{ij}$ - it is the prediction against the target \cref{eq:target-ropart}. A standard Vision Transformer encoder is used, with one exception:
 \begin{align}
   X &= \mathrm{PatchEmbed}(\tilde I) \in \mathbb{R}^{N \times d},
   &
@@ -363,7 +363,7 @@ Pair sampling is a crucial step in the process. $M$ ordered pairs are drawn (wit
   \quad
   j = \mathrm{idx} \bmod N .
 \end{equation}
-At $P=32,N=49$ and $M=2048$, $M/N^2\approx85\%$ of all ordered pairs (including $N$ diagonal cells) are sampled. $2048$ was chosen as upstream swept $512-4096$.
+At $P=32,N=49$ and $M=2048$, $M/N^2\approx85\%$ of all ordered pairs (including $N$ diagonal cells) are sampled. $2048$ was chosen as upstream swept $512$--$4096$.
 
 The next step is to construct the query. There are two options
 \begin{itemize}
@@ -379,7 +379,7 @@ So for pair $m=(i,j)$ the options are
   \qquad\text{with keys } x'_n \leftarrow x'_n + \mathrm{PE}_{1\mathrm{d}}[n].
   \label{eq:query-positional}
 \end{align}
-During experiments on a single batch, \texttt{patch\_cat} was able to overfit and learn normally whereas \texttt{positional} collapsed to the mean-prediction floor. Those experiments were ran on the baseline model and resulted in the decision to opt to \texttt{patch\_cat}. Note that this is limited to this configuration and by no mean states a general rule.
+During experiments on a single batch, \texttt{patch\_cat} was able to overfit and learn normally whereas \texttt{positional} collapsed to the mean-prediction floor. Those experiments were run on the baseline model and resulted in the decision to opt to \texttt{patch\_cat}. Note that this is limited to this configuration and by no means states a general rule.
 
 Following the query, we construct a single cross-attention layer with a single head. The queries are $Q = [q_1; \dots; q_M]$ and keys/values the patch tokens are $X'$:
 \begin{equation}\label{eq:cross-attention}
@@ -440,7 +440,7 @@ Finally, adjustments were made to allow the code to run both in local developmen
 
 
 \section{Experimental infrastructure}\label{sec:infrastructure}
-The scripts were carefully designed to avoid wasting GPU time on failed runs. To achieve this, auto-resume functionality was introduced. Training scripts automatically check for \py{\{OUT\}/checkpoint.pth} and on a hit, resume from that checkpoint. There is however, a worse issue than a missing checkpoint - a truncated checkpoint may not crash the script but will nevertheless corrupt the results. To avoid this issue, atomic checkpointing was introduced. While the checkpoint is overwritten every epoch, we added functionality to save snapshots of the model every $N$ epochs. The runs were tracked semi-online using Weights and Biases in offline mode and a custom script to sync periodically. 
+The scripts were carefully designed to avoid wasting GPU time on failed runs. To achieve this, auto-resume functionality was introduced. Training scripts automatically check for \py{\{OUT\}/checkpoint.pth} and on a hit, resume from that checkpoint. There is, however, a worse issue than a missing checkpoint - a truncated checkpoint may not crash the script but will nevertheless corrupt the results. To avoid this issue, atomic checkpointing was introduced. While the checkpoint is overwritten every epoch, we added functionality to save snapshots of the model every $N$ epochs. The runs were tracked semi-online using Weights and Biases in offline mode and a custom script to sync periodically. 
 
 For pretraining, four large jobs were ran with a matched-budget of 250 epochs. A summary is provided in \cref{tab:run-inventory}.
 
@@ -463,7 +463,7 @@ For pretraining, four large jobs were ran with a matched-budget of 250 epochs. A
   \end{tabular}
 \end{table}
 
-While pretraining ran on the SLURM cluster, both finetunes ran on DoC GPU boxes as at the queue times (3.5 days) greatly exceeded the job length (4 hours). Below is a brief overview:
+While pretraining ran on the SLURM cluster, both finetunes ran on DoC GPU boxes as the queue times (3.5 days) greatly exceeded the job length (4 hours). Below is a brief overview:
 
 \begin{table}[htbp]
   \centering
@@ -580,7 +580,7 @@ the circular median - achieves
   \begin{cases} 20.0^\circ, & a = 30^\circ,\\ 60.0^\circ, & a = 90^\circ,\end{cases}
   \qquad\text{and } 90^\circ \text{ for the full circle.}
 \end{equation}
-Note that this definition permits $\pm90^\circ$ worse absolute angular error while learning orientation better once floor-normalised. The measured values were $19.96^\circ$ and $59.89^\circ$ - any rotation results will be read agains either of the two numbers.
+Note that this definition permits $\pm90^\circ$ worse absolute angular error while learning orientation better once floor-normalised. The measured values were $19.96^\circ$ and $59.89^\circ$ - any rotation results will be read against either of the two numbers.
 
 Angular error itself is defined as:
 \begin{equation}\label{eq:metric-ang-mae}
@@ -589,7 +589,7 @@ Angular error itself is defined as:
 \end{equation}
 and is the headline rotation metric.
 
-Finally, the models predictions must pass through four intrinsic gates. Denote $\hat t_{ij} = (\hat\theta^x_{ij}, \hat\theta^y_{ij})$ and
+Finally, the model's predictions must pass through four intrinsic gates. Denote $\hat t_{ij} = (\hat\theta^x_{ij}, \hat\theta^y_{ij})$ and
 $\hat u_{ij} = (\hat c_{ij}, \hat s_{ij})$.
 
 \begin{enumerate}
